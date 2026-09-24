@@ -111,7 +111,7 @@ final class Support
             Db::run('UPDATE support_threads SET status = \'waiting_user\', last_message_at = NOW() WHERE id = ?', [$threadId]);
             Notifications::emit((int) $thread['user_id'], 'support', 'Support replied',
                 'You have a new reply from ExamLegacy support.',
-                ['thread_id' => $threadId], 'support_reply:' . $threadId . ':' . time());
+                ['thread_id' => $threadId], 'support_reply:' . $threadId . ':' . random_hex(6));
         });
     }
 
