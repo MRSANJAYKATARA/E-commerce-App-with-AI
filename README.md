@@ -1,61 +1,163 @@
-# E-Commerce App with Admin Panel and Mobile Integration
+# ExamLegacy
 
-An all-in-one **E-commerce App** and **Admin Panel** built using AI-powered tools. This project is designed to help you create a professional, responsive, and fully functional e-commerce platform without writing complex code.  
+**SANJAYXLEGACY Powered By** — a premium, production-oriented digital education platform.
 
----
-
-## 🚀 Features  
-
-### User Features  
-- **User Authentication:** Secure login and registration system.  
-- **Product Search & Filtering:** Effortlessly find desired products.  
-- **Add to Cart:** Seamless cart management with real-time updates.  
-- **Responsive Design:** Works perfectly across desktop, tablet, and mobile.  
-
-### Admin Panel Features  
-- **User Management:** View and manage all authenticated users.  
-- **Product Management:**  
-  - Add, edit, and delete products.  
-  - Manage inventory and pricing.  
-- **Order Management:**  
-  - Access order details, including user names, addresses, and delivery info.  
-  - Update order status in real time.  
-- **Admin Security:** Implemented authentication for admin dashboard access.  
-- **Responsive UI:** Fully optimized for desktops and smartphones.  
-
-### Additional Functionalities  
-- **Live Hosting:** Your e-commerce app and website can be hosted online.  
-- **Mobile Application:** Fully integrated with the site and admin panel for seamless functionality.  
+ExamLegacy is not a PDF-selling page. It is a complete student ecosystem: a secure PDF
+store, a private digital library, a secure in-app PDF viewer, a Gemini-powered **Study AI**,
+separate **Support AI** / **Help AI**, in-app **human support**, a **Store Wallet**, separate
+**AI Credits**, **VIP PASS**, native-style **notifications**, account management and a full
+**admin panel** — with **Cashfree** payments verified server-side.
 
 ---
 
-## 📂 Project Structure  
-- **Frontend:** Built with [technology/tool used, e.g., Flutter/React].  
-- **Backend:** Features include database integration, API authentication, and admin functionalities.  
-- **Database:** Secure storage for user, product, and order data.  
+## Architecture at a glance
+
+```
+Browser (HTML5 + CSS3 + Vanilla JS)
+   │  Firebase Google Sign-In  →  short-lived ID token (Authorization: Bearer)
+   ▼
+PHP API  (api/index.php front controller  +  api/lib/*)
+   │  verifies the Firebase token, maps to a MySQL user, re-checks every authorization
+   ▼
+MySQL  (authoritative: users, orders, wallet ledger, AI-credit ledger, PDF access, …)
+   │
+   ├─ Cashfree  (server-side order create + verification + signed webhook)
+   ├─ Gemini    (server-side Study/Support/Help AI; key never leaves the server)
+   ├─ PHPMailer (transactional email)
+   └─ Protected storage (storage/pdfs, storage/uploads) — never served at a public URL
+```
+
+- **The frontend is never a security authority.** Every protected action is validated on the
+  server against the verified Firebase identity + MySQL ownership.
+- **MySQL is the single source of truth** for money and access. The Store Wallet and AI
+  Credits are **immutable, append-only ledgers**; balances are cached aggregates updated in the
+  same transaction.
+- **PDFs have no public URL.** Reading goes: verified user → active `pdf_access` (from a paid
+  order) → short-lived, hashed viewer-session token → server streams the bytes → in-app viewer
+  renders them with a dynamic purchaser watermark. Revoked/refunded/expired access stops working
+  immediately because every protected access is re-validated.
+
+> Note on screenshots: browsers cannot guarantee 100% screenshot prevention, so ExamLegacy makes
+> **no such claim**. It uses real, layered deterrence: private file access, server-side
+> authorization, short-lived sessions, watermarking, access logging and download/print/copy
+> controls.
 
 ---
 
-## 🔗 Stay Connected  
+## Tech stack
 
-For updates, tutorials, and support, follow us:  
-
-- [Telegram Channel](https://t.me/You_B_Tech)  
-- [YouTube](https://youtube.com/@You_B_Tech)  
-- [Instagram](https://instagram.com/you_b_tech)  
-- [Website](https://youbtech.xyz)  
-
----
-
-## 📜 License  
-This project is licensed under the [MIT License](LICENSE).  
-
----  
-
-## 💡 Contributions  
-We welcome contributions! Feel free to open issues or submit pull requests to enhance the project.  
+| Layer | Technology |
+|---|---|
+| Frontend | HTML5, CSS3, Vanilla JavaScript (no framework) |
+| Backend | PHP 8.1+ |
+| Database | MySQL 8 (authoritative) + Firebase Authentication |
+| Auth | Firebase Google Sign-In (ID tokens verified server-side) |
+| Payments | Cashfree (PG) — server-side verification + webhooks |
+| AI | Google Gemini API (server-side only) |
+| Email | PHPMailer over SMTP |
+| Storage | Local protected server storage (Firebase Storage is **not** used) |
 
 ---
 
-## 📞 Support  
-If you have any questions or need help, visit our [Telegram Help Center](https://t.me/You_B_Tech_Coding).
+## Repository layout
+
+```
+index.html                 Student app shell
+admin/index.html           Admin dashboard shell
+assets/css/app.css         Design system (tokens, light/dark, native-app feel)
+assets/js/*.js             Front-end app (config, api, auth, ui, viewer, app)
+admin/assets/*             Admin dashboard (css + js)
+api/
+  index.php                Front controller / router + authorization
+  config.php               Env loading, constants, helpers, autoloader
+  lib/*.php                Domain logic (Auth, Wallet, AiCredits, Orders, Payments,
+                           PdfVault, StudyAi, Support, Notifications, Admin, Mailer, …)
+migrations/
+  schema.sql               Full MySQL schema
+  seed.sql                 Safe defaults (settings, VIP plans, credit packs)
+storage/                   PROTECTED (pdfs, uploads, public covers) — blocked by .htaccess
+server.php                 Router for `php -S` local dev
+docs/                      DEPLOYMENT.md, ARCHITECTURE.md
+.env.example               Copy to .env and fill in (never commit .env)
+```
+
+---
+
+## Quick start (local, PHP built-in server)
+
+```bash
+# 1. PHP 8.1+ with extensions: pdo_mysql, mbstring, curl, fileinfo, openssl, json
+# 2. MySQL: create a database and import the schema + seed
+mysql -u root -p -e "CREATE DATABASE examlegacy CHARACTER SET utf8mb4;"
+mysql -u root -p examlegacy < migrations/schema.sql
+mysql -u root -p examlegacy < migrations/seed.sql
+
+# 3. Configure secrets (copy + edit). NEVER commit the real .env
+cp .env.example .env
+
+# 4. Install PHP dependencies (PHPMailer)
+composer install
+
+# 5. Put your Firebase *web* config in assets/js/config.js
+#    and your Firebase *project id* in .env (FIREBASE_PROJECT_ID)
+
+# 6. Run
+php -S 127.0.0.1:8000 server.php
+```
+
+Open `http://127.0.0.1:8000` (student app) and `http://127.0.0.1:8000/admin`.
+To make a user an admin: `UPDATE users SET role='admin' WHERE email='you@example.com';`
+after their first Google sign-in.
+
+See **docs/DEPLOYMENT.md** for Apache/Nginx, webhooks, and the deployment/rollback process.
+
+---
+
+## What is implemented (real, not mocked)
+
+- **Auth:** Firebase Google Sign-In; server verifies the ID token signature + claims, then maps
+  to a MySQL user (created on first login). Blocked/disabled accounts are rejected server-side.
+- **Store:** browse/search/filter published products; per-user "owned" flag from real access.
+- **Payments:** Cashfree orders created server-side; orders become **PAID** only after a verified
+  gateway fetch or a **signature-verified webhook** (idempotent). Browser callbacks are never trusted.
+- **Store Wallet:** immutable ledger; recharge, purchase, refund, bonus, admin adjustment; no
+  withdrawal/transfer. Atomic + idempotent.
+- **AI Credits:** separate ledger; trial credits on first login, purchasable packs, per-use
+  deduction with usage records, admin add/deduct.
+- **Secure PDF viewer:** ownership → short-lived hashed viewer session → byte streaming with HTTP
+  Range support → PDF.js rendering with dynamic purchaser watermark; download policy per product;
+  unauthorized attempts logged.
+- **Study AI:** Gemini over authorized content only (a purchased PDF after ownership check, or the
+  user's own upload/pasted text). It cannot reach other users' files, unpublished PDFs, arbitrary
+  URLs or the server directory.
+- **Support:** separate grounded **Support AI** (verified account data only) and general **Help
+  AI**, plus in-app human threads with the Open → Waiting → Resolved → Closed workflow.
+- **Notifications:** idempotent (unique `event_key`) across purchase/payment/PDF/wallet/AI/VIP/
+  support/system categories; duplicates from webhooks/retries are prevented.
+- **VIP PASS:** monthly / yearly / unlimited plans with transparent, stored fair-use + rate-limit +
+  anti-abuse rules (no false "unlimited" promises).
+- **Admin panel:** products (+ protected PDF & cover upload), users (block/unblock, enable/disable,
+  wallet credit/debit, AI-credit add/deduct, PDF grant/revoke, VIP grant, notify), orders (+ refund),
+  support, notifications/broadcast, settings (external links, WhatsApp-support toggle default OFF),
+  VIP plans, and an immutable audit log. Every privileged action is audited.
+
+---
+
+## Security rules enforced in code
+
+- No Gemini / Cashfree / MySQL / SMTP / Firebase-service secrets in the client. Only the public
+  Firebase web config is in the browser.
+- No private PDF paths or server internals are ever returned to the client.
+- Product IDs, order IDs, tokens and `localStorage` are **never** trusted for authorization.
+- All financial mutations are atomic (`SELECT … FOR UPDATE` inside a transaction) and idempotent.
+
+---
+
+## Branding
+
+- Product owner: **Sanjay Katara** · Brand: **SANJAYXLEGACY** · "SANJAYXLEGACY Powered By"
+- Support email: sanjayxlegacysupport@gmail.com
+- Social/channel links and the WhatsApp-support toggle are **admin-configured** (see Settings).
+  WhatsApp Support is **OFF by default**; no personal WhatsApp number is hard-coded.
+
+See `docs/ARCHITECTURE.md` for the data model and security flow details.

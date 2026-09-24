@@ -1,0 +1,23 @@
+{
+  "name": "examlegacy/app",
+  "description": "ExamLegacy — premium digital education platform (PHP backend)",
+  "type": "project",
+  "require": {
+    "php": ">=8.1",
+    "phpmailer/phpmailer": "^6.9"
+  },
+  "require-dev": {},
+  "autoload": {
+    "psr-4": {
+      "ExamLegacy\\": "api/lib/"
+    }
+  },
+  "config": {
+    "optimize-autoloader": true
+  },
+  "scripts": {
+    "post-install-cmd": [
+      "@php -r \"echo 'Run: php -S or configure your web server to serve /api/index.php';\""
+    ]
+  }
+}
