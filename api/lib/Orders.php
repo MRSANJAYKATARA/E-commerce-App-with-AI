@@ -98,6 +98,15 @@ final class Orders
         }
         $gatewayAmount = $total - $walletApplied;
 
+        // If a gateway payment is needed, the customer phone is required by Cashfree.
+        // Validate BEFORE creating the order so failed attempts don't orphan pending orders.
+        if ($gatewayAmount > 0) {
+            $phone = Db::scalar('SELECT phone FROM users WHERE id = ?', [$userId]);
+            if ($phone === null || $phone === '') {
+                throw new ApiError('phone_required', 'Please add a phone number to your account before online payment', 422);
+            }
+        }
+
         // Persist order (PENDING).
         $orderCode = public_code('EL');
         Db::run(
