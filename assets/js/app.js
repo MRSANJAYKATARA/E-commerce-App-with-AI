@@ -10,7 +10,8 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
     EL.ui.theme.apply();
     buildShell();
     EL.auth.onChange(function () { EL.ui.dispatch(); refreshUnread(); });
-    try { EL.state.config = (await EL.api.get('/config')).config || {}; } catch (e) {}
+    try { EL.state.config = (await EL.api.get('/config')).config || {}; } catch (e) { EL.state.offline = true; }
+    if (EL.state.offline) { showOfflineBanner(); }
     defineRoutes();
     EL.ui.start();
     try {
@@ -57,6 +58,17 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
     var next = order[(order.indexOf(cur) + 1) % order.length];
     EL.ui.theme.set(next);
     EL.ui.toast('Appearance: ' + next);
+  }
+
+  /* Honest connectivity banner (shown when the API backend is unreachable). */
+  function showOfflineBanner() {
+    var bar = document.createElement('div');
+    bar.className = 'alert info';
+    bar.style.cssText = 'margin:12px 16px 0;border-radius:14px';
+    bar.innerHTML = EL.ui.icon('triangle-exclamation') +
+      '<div><strong>Preview mode.</strong> The PHP/MySQL backend isn\'t running in this sandbox, so live data, sign-in, purchases and AI are unavailable here. Deploy with a PHP+MySQL host and your Firebase/Cashfree/Gemini credentials to enable them. <a href="docs/DEPLOYMENT.md">Deployment guide →</a></div>';
+    var content = EL.qs('#content');
+    if (content && content.parentNode) { content.parentNode.insertBefore(bar, content); }
   }
 
   async function refreshUnread() {
@@ -134,7 +146,11 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
         ? '<div class="grid cols-2">' + products.slice(0, 8).map(productCard).join('') + '</div>'
         : EL.ui.empty({ icon: 'box-open', title: 'No material published yet', text: 'Check back soon.' });
       bindProductCards(c);
-    } catch (e) { EL.qs('#featured', c).innerHTML = EL.ui.errorBox(e.message); }
+      } catch (e) {
+        EL.qs('#featured', c).innerHTML = EL.state.offline
+          ? EL.ui.empty({ icon: 'cloud', title: 'Catalog loads once the backend is connected', text: 'This preview has no live data.' })
+          : EL.ui.errorBox(e.message);
+      }
   }
 
   function feature(ic, t, p) {
@@ -185,7 +201,11 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
           ? '<div class="grid cols-2">' + items.map(productCard).join('') + '</div>'
           : EL.ui.empty({ icon: 'magnifying-glass', title: 'No results', text: 'Try a different search or category.' });
         bindProductCards(host);
-      } catch (e) { host.innerHTML = EL.ui.errorBox(e.message); }
+      } catch (e) {
+        host.innerHTML = EL.state.offline
+          ? EL.ui.empty({ icon: 'cloud', title: 'Store unavailable in preview', text: 'Connect the PHP/MySQL backend to load the catalog.' })
+          : EL.ui.errorBox(e.message);
+      }
     }
     try {
       EL.state.categories = (await EL.api.get('/categories')).categories || [];
