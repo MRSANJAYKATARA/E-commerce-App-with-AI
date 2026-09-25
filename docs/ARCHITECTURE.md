@@ -83,6 +83,12 @@ Source-type vocabulary is resolved transparently before authorization (`library`
 `purchased_pdf`, `pdf` → `purchased`; `uploads`, `document`, `file` → `upload`; `paste`, `free` →
 `text`), so clients sending either naming scheme hit the same authorization path instead of a 400.
 
+**All-in-one mode:** when no source is supplied (`source_type` empty/`general`/`chat`), Study AI
+answers from model knowledge — a purchase is never required to ask a study question. Multi-turn
+`history` (capped at 12 turns, each truncated) is forwarded to Gemini as proper `contents` roles,
+so the chat behaves like a real conversation while every *grounded* turn still re-verifies
+ownership server-side.
+
 Content is sent to Gemini from the server (the API key never reaches the browser). Small files go
 inline; oversized PDFs fall back to best-effort text extraction. There is no path by which the
 model can read another user's files, unpublished PDFs, arbitrary URLs, or list the server directory.
@@ -100,6 +106,21 @@ model can read another user's files, unpublished PDFs, arbitrary URLs, or list t
 `notifications.event_key` is unique; inserts that collide (duplicate webhook/event) are ignored, so
 the same event never produces two notifications. `user_id IS NULL` broadcasts to all users.
 
+## Rate limiting & abuse protection
+
+`api/lib/RateLimit.php` enforces fixed-window counters in the `rate_limits` table (works across
+PHP workers; buckets keyed by verified user id so one user cannot starve another):
+
+| Scope | Limit |
+|---|---|
+| `POST /api/ai/study` | 30 / min per user |
+| `POST /api/ai/support`, `/api/ai/help` | 20 / min per user |
+| `POST /api/viewer/session` | 30 / min per user |
+| `POST /api/orders`, `/api/wallet/recharge` | 15 / min per user |
+
+Exceeding a limit returns **429** with a retry hint. Stale windows are cleaned opportunistically.
+Existing databases upgrade with `migrations/002_rate_limits.sql`.
+
 ## Frontend
 
 Vanilla JS SPA: hash router (`ui.js`), a thin `api.js` that attaches the ID token, `auth.js` for
@@ -114,6 +135,21 @@ Support AI and Help AI answer. The home screen ships the 2026/27 Exam Accelerato
 with quick chips that deep-link into the store (`#/store?cat=…`). Profile pictures are uploaded
 from the Account screen (camera badge, ≤2 MB, image/* re-sniffed server-side) to
 `storage/public/avatars/` and streamed through `/api/cover` — raw storage URLs are never exposed.
+
+**Navigation:** Home · Store · Study AI · Vault · Account (bottom nav + side rail). The purchased
+content section is branded **Legacy Vault** (`#/vault`, `library` kept as a legacy alias); all
+support surfaces (Support AI chat, Help AI, human tickets) live inside **Account → Help &
+Support**. Study AI and both support AIs use a shared ChatGPT-style bubble chat (mini-markdown
+renderer, typing indicator, suggestion chips, enter-to-send, per-tab history).
+
+**Motion:** boot splash (logo + shimmer) with a minimum dwell and a hard safety timeout,
+staggered route entrances (`.rise-in`), message pop-ins, aurora ambience, frosted topbar on
+scroll, press micro-interactions — all CSS/GPU-based and neutralised under
+`prefers-reduced-motion`.
+
+**Branding:** `assets/img/logo.svg` + `assets/img/mark.svg` drive the splash, favicon, topbar,
+auth screen and admin shell. **No PWA by design** — no manifest, no service worker, no install
+prompt, per the product directive.
 
 ## Design decisions & scope notes
 

@@ -187,6 +187,7 @@ function route(string $path, string $method): void
     }
     if ($path === '/orders' && $method === 'POST') {
         $u = Auth::authenticate();
+        RateLimit::forUser('orders', (int) $u['id'], 15, 60);
         $b = Http::jsonBody();
         $ids = isset($b['product_ids']) && is_array($b['product_ids']) ? $b['product_ids'] : [];
         $methodName = (string) ($b['method'] ?? 'cashfree');
@@ -226,6 +227,7 @@ function route(string $path, string $method): void
     }
     if ($path === '/wallet/recharge' && $method === 'POST') {
         $u = Auth::authenticate();
+        RateLimit::forUser('recharge', (int) $u['id'], 15, 60);
         $b = Http::jsonBody();
         $amount = (int) ($b['amount_paise'] ?? 0);
         if ($amount < 1000) {
@@ -289,6 +291,7 @@ function route(string $path, string $method): void
     // ---- Viewer session (auth) ----
     if ($path === '/viewer/session' && $method === 'POST') {
         $u = Auth::authenticate();
+        RateLimit::forUser('viewer', (int) $u['id'], 30, 60);
         $b = Http::jsonBody();
         $productId = (int) ($b['product_id'] ?? 0);
         Http::ok(['session' => PdfVault::issueViewerSession((int) $u['id'], $productId)]);
@@ -298,24 +301,46 @@ function route(string $path, string $method): void
     // ---- Study / Support / Help AI ----
     if ($path === '/ai/study' && $method === 'POST') {
         $u = Auth::authenticate();
+        RateLimit::forUser('ai-study', (int) $u['id'], 30, 60);
         $b = Http::jsonBody();
         $source = [
-            'type' => (string) ($b['source_type'] ?? 'text'),
+            'type' => (string) ($b['source_type'] ?? ''),
             'product_id' => (int) ($b['product_id'] ?? 0),
             'document_id' => (int) ($b['document_id'] ?? 0),
             'text' => (string) ($b['text'] ?? ''),
         ];
-        Http::ok(StudyAi::ask((int) $u['id'], $source, (string) ($b['question'] ?? ''), (string) ($b['task'] ?? 'concept')));
+        // Chat history for multi-turn conversations (capped server-side).
+        $history = [];
+        if (isset($b['history']) && is_array($b['history'])) {
+            foreach (array_slice($b['history'], -12) as $h) {
+                if (!is_array($h)) {
+                    continue;
+                }
+                $t = trim((string) ($h['text'] ?? ''));
+                if ($t === '') {
+                    continue;
+                }
+                $role = (string) ($h['role'] ?? 'user');
+                $history[] = [
+                    'role' => ($role === 'model' || $role === 'assistant') ? 'model' : 'user',
+                    'text' => mb_substr($t, 0, 4000),
+                ];
+            }
+        }
+        $question = (string) ($b['question'] ?? $b['message'] ?? '');
+        Http::ok(StudyAi::ask((int) $u['id'], $source, $question, (string) ($b['task'] ?? 'concept'), $history));
         return;
     }
     if ($path === '/ai/support' && $method === 'POST') {
         $u = Auth::authenticate();
+        RateLimit::forUser('ai-support', (int) $u['id'], 20, 60);
         $b = Http::jsonBody();
         Http::ok(Support::supportAi((int) $u['id'], (string) ($b['message'] ?? '')));
         return;
     }
     if ($path === '/ai/help' && $method === 'POST') {
         $u = Auth::authenticate();
+        RateLimit::forUser('ai-help', (int) $u['id'], 20, 60);
         $b = Http::jsonBody();
         Http::ok(Support::helpAi((int) $u['id'], (string) ($b['message'] ?? '')));
         return;
@@ -431,6 +456,86 @@ function adminRoutes(string $path, string $method): void
     if (preg_match('#^/admin/users/(\d+)/vip$#', $path, $m) && $method === 'POST') {
         $b = Http::jsonBody();
         Admin::grantVip($adminId, (int) $m[1], (int) ($b['plan_id'] ?? 0));
+        Http::ok([]);
+        return;
+    }
+
+    if ($path === '/admin/credits/packs' && $method === 'GET') {
+        Http::ok(['packs' => Db::all('SELECT * FROM credit_packs ORDER BY price_paise')]);
+        return;
+    }
+    if ($path === '/admin/credits/packs' && $method === 'POST') {
+        $b = Http::jsonBody();
+        $code = strtolower(preg_replace('/[^a-z0-9_]+/i', '_', (string) ($b['code'] ?? '')));
+        $name = trim((string) ($b['name'] ?? ''));
+        $credits = max(0, (int) ($b['credits'] ?? 0));
+        $bonus = max(0, (int) ($b['bonus_credits'] ?? 0));
+        $price = max(0, (int) ($b['price_paise'] ?? 0));
+        if ($name === '' || $credits <= 0 || $price <= 0) {
+            throw new ApiError('invalid_input', 'Name, credits and price are required', 400);
+        }
+        if ($code === '') {
+            $code = 'pack_' . random_hex(4);
+        }
+        try {
+            Db::run(
+                'INSERT INTO credit_packs (code, name, credits, bonus_credits, price_paise, currency, is_active)
+                 VALUES (?,?,?,?,?,?,?)',
+                [substr($code, 0, 40), substr($name, 0, 120), $credits, $bonus, $price,
+                 strtoupper((string) ($b['currency'] ?? 'INR')), 1]
+            );
+        } catch (PDOException $e) {
+            if ((string) $e->getCode() === '23000') {
+                throw new ApiError('conflict', 'A pack with this code already exists', 409);
+            }
+            throw $e;
+        }
+        Admin::audit($adminId, 'credit_pack_create', 'credit_packs', (string) Db::insertId(), null, $b);
+        Http::ok(['pack' => Db::one('SELECT * FROM credit_packs WHERE id = ?', [Db::insertId()])], 201);
+        return;
+    }
+    if (preg_match('#^/admin/credits/packs/(\d+)$#', $path, $m) && $method === 'PATCH') {
+        $id = (int) $m[1];
+        $before = Db::one('SELECT * FROM credit_packs WHERE id = ?', [$id]);
+        if ($before === null) {
+            throw new ApiError('not_found', 'Pack not found', 404);
+        }
+        $b = Http::jsonBody();
+        $fields = [];
+        $params = [];
+        $map = [
+            'name' => 'string', 'credits' => 'int', 'bonus_credits' => 'int',
+            'price_paise' => 'int', 'is_active' => 'bool', 'currency' => 'string',
+        ];
+        foreach ($map as $col => $kind) {
+            if (!array_key_exists($col, $b)) {
+                continue;
+            }
+            $fields[] = $col . ' = ?';
+            if ($kind === 'int') {
+                $params[] = $col === 'credits' ? max(0, (int) $b[$col]) : (int) $b[$col];
+            } elseif ($kind === 'bool') {
+                $params[] = $b[$col] ? 1 : 0;
+            } else {
+                $params[] = $col === 'name' ? substr(trim((string) $b[$col]), 0, 120) : strtoupper((string) $b[$col]);
+            }
+        }
+        if ($fields) {
+            $params[] = $id;
+            Db::run('UPDATE credit_packs SET ' . implode(', ', $fields) . ' WHERE id = ?', $params);
+            Admin::audit($adminId, 'credit_pack_update', 'credit_packs', (string) $id, $before, $b);
+        }
+        Http::ok(['pack' => Db::one('SELECT * FROM credit_packs WHERE id = ?', [$id])]);
+        return;
+    }
+    if (preg_match('#^/admin/credits/packs/(\d+)$#', $path, $m) && $method === 'DELETE') {
+        $id = (int) $m[1];
+        $before = Db::one('SELECT * FROM credit_packs WHERE id = ?', [$id]);
+        if ($before === null) {
+            throw new ApiError('not_found', 'Pack not found', 404);
+        }
+        Db::run('UPDATE credit_packs SET is_active = 0 WHERE id = ?', [$id]);
+        Admin::audit($adminId, 'credit_pack_archive', 'credit_packs', (string) $id, $before, ['is_active' => 0]);
         Http::ok([]);
         return;
     }

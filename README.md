@@ -93,6 +93,8 @@ service mariadb start   # Debian/Ubuntu; use mysqld/mysqld_safe elsewhere
 mysql -u root -p -e "CREATE DATABASE examlegacy CHARACTER SET utf8mb4;"
 mysql -u root -p examlegacy < migrations/schema.sql
 mysql -u root -p examlegacy < migrations/seed.sql
+# Upgrading an EXISTING database? also run:
+#   mysql -u root -p examlegacy < migrations/002_rate_limits.sql
 
 # 3. Configure secrets (copy + edit). NEVER commit the real .env
 cp .env.example .env
@@ -129,19 +131,33 @@ See **docs/DEPLOYMENT.md** for Apache/Nginx, webhooks, and the deployment/rollba
 - **Secure PDF viewer:** ownership → short-lived hashed viewer session → byte streaming with HTTP
   Range support → PDF.js rendering with dynamic purchaser watermark; download policy per product;
   unauthorized attempts logged.
-- **Study AI:** Gemini over authorized content only (a purchased PDF after ownership check, or the
-  user's own upload/pasted text). It cannot reach other users' files, unpublished PDFs, arbitrary
-  URLs or the server directory.
-- **Support:** separate grounded **Support AI** (verified account data only) and general **Help
-  AI**, plus in-app human threads with the Open → Waiting → Resolved → Closed workflow.
+- **Study AI:** a ChatGPT/Gemini-style **all-in-one study chat** — ask *any* study question on
+  *any* subject with no purchase required, with multi-turn history, answer styles (concept, MCQs,
+  notes, flashcards…) and MathJax-rendered equations. Optional grounding: attach a purchased PDF
+  from the **Legacy Vault**, upload a file, or paste text — authorization is re-checked
+  server-side and it can never reach other users' files, unpublished PDFs, URLs or the server.
+- **Support:** separate grounded **Support AI** (verified account data only — deposits, orders,
+  PDF access, wallet) and general **Help AI**, plus in-app human threads with the Open → Waiting →
+  Resolved → Closed workflow. Everything support-related lives in the **Account** section.
 - **Notifications:** idempotent (unique `event_key`) across purchase/payment/PDF/wallet/AI/VIP/
   support/system categories; duplicates from webhooks/retries are prevented.
 - **VIP PASS:** monthly / yearly / unlimited plans with transparent, stored fair-use + rate-limit +
   anti-abuse rules (no false "unlimited" promises).
 - **Admin panel:** products (+ protected PDF & cover upload), users (block/unblock, enable/disable,
   wallet credit/debit, AI-credit add/deduct, PDF grant/revoke, VIP grant, notify), orders (+ refund),
-  support, notifications/broadcast, settings (external links, WhatsApp-support toggle default OFF),
-  VIP plans, and an immutable audit log. Every privileged action is audited.
+  support, notifications/broadcast, **credit-pack CRUD**, settings (external links, WhatsApp-support
+  toggle default OFF, AI costs), VIP plans, and an immutable audit log. Every privileged action is
+  audited.
+- **Navigation:** Home · Store · Study AI · **Legacy Vault** (unique name for everything you
+  purchased) · Account. Help & Support (Support AI, Help AI, human tickets) is inside **Account**.
+- **Motion & polish:** boot splash with the ExamLegacy logo, staggered page entrances, chat bubble
+  animations, aurora ambience, frosted topbar — all GPU-cheap and disabled under
+  `prefers-reduced-motion`. Works on mobile, desktop and all modern browsers.
+- **Branding assets:** `assets/img/logo.svg` (full badge + wordmark) and `assets/img/mark.svg`
+  (icon) — used by the splash, favicon, topbar, auth screen and admin. To use the official PNG
+  artwork instead, drop it at `assets/img/logo.png` and update the references.
+- **No PWA by design:** there is intentionally **no** web app manifest, service worker or install
+  prompt — the product directive explicitly rules out a PWA install system.
 
 ---
 
@@ -152,6 +168,11 @@ See **docs/DEPLOYMENT.md** for Apache/Nginx, webhooks, and the deployment/rollba
 - No private PDF paths or server internals are ever returned to the client.
 - Product IDs, order IDs, tokens and `localStorage` are **never** trusted for authorization.
 - All financial mutations are atomic (`SELECT … FOR UPDATE` inside a transaction) and idempotent.
+- **Rate limiting** (MySQL fixed-window): AI endpoints 30/min per user (20/min for Support/Help),
+  viewer sessions 30/min, order creation & wallet recharge 15/min — automated abuse cannot drain
+  credits, mint viewer tokens or hammer the gateway. Returns `429` with a retry hint.
+- Security headers: `nosniff`, `SAMEORIGIN` framing, strict referrer, `Permissions-Policy`
+  (camera/mic/geo disabled) — in both `.htaccess` (Apache) and `server.php` (dev).
 
 ---
 

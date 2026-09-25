@@ -78,7 +78,7 @@
     });
   }
   function showLogin(err){
-    document.body.innerHTML='<div class="login"><div class="box"><div class="mark">EL</div>'+
+    document.body.innerHTML='<div class="login"><div class="box"><img class="mark" src="/assets/img/logo.svg" alt="" width="84" height="84">'+
       '<h1>ExamLegacy Admin</h1><p>Sign in with an administrator Google account.</p>'+
       (err?'<div class="badge red" style="margin-bottom:12px">'+esc(err)+'</div>':'')+
       '<button class="btn block" id="adm-signin">'+icon('brands','fab fa-google')+' Continue with Google</button>'+
@@ -97,6 +97,7 @@
     {id:'support',label:'Support',icon:'headset'},
     {id:'notifications',label:'Notifications',icon:'bell'},
     {id:'vip',label:'VIP PASS',icon:'crown'},
+    {id:'packs',label:'Credit packs',icon:'coins'},
     {id:'settings',label:'Settings',icon:'gear'},
     {id:'audit',label:'Audit log',icon:'clipboard-list'}
   ];
@@ -104,7 +105,7 @@
   function renderShell(){
     document.body.innerHTML=
       '<div class="shell">'+
-      '<aside class="sidebar" id="sidebar"><div class="logo"><div class="m">EL</div><span>ExamLegacy</span></div><nav class="nav" id="nav"></nav></aside>'+
+      '<aside class="sidebar" id="sidebar"><div class="logo"><img class="m" src="/assets/img/mark.svg" alt=""><span>ExamLegacy</span></div><nav class="nav" id="nav"></nav></aside>'+
       '<div style="flex:1;min-width:0">'+
         '<div class="topbar"><button class="iconbtn hamb" id="hamb">'+icon('bars')+'</button><h1 id="sec-title">Dashboard</h1>'+
         '<button class="iconbtn" id="theme-btn">'+icon('moon')+'</button>'+
@@ -120,7 +121,7 @@
   }
   function go(id){section=id;qsa('#nav [data-sec]').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-sec')===id);});
     var s=SECTIONS.filter(function(x){return x.id===id;})[0]; if(s)qs('#sec-title').textContent=s.label;
-    ({dashboard:dashboard,products:products,orders:orders,users:users,support:support,notifications:notifications,vip:vip,settings:settings,audit:audit})[id]();
+    ({dashboard:dashboard,products:products,orders:orders,users:users,support:support,notifications:notifications,vip:vip,packs:packs,settings:settings,audit:audit})[id]();
   }
 
   /* ---------- Dashboard ---------- */
@@ -354,7 +355,7 @@
     var m=qs('#main');
     m.innerHTML='<div class="card"><div id="sf"><div class="spinner"></div></div><button class="btn mt16" id="save-s">Save settings</button></div>';
     var s;try{s=(await api('GET','/admin/settings')).settings||{};}catch(e){return qs('#sf').innerHTML='<div class="badge red">'+esc(e.message)+'</div>';}
-    var fields=['support_email','telegram','telegram_channel','instagram','youtube','whatsapp_channel','whatsapp_support_enabled','whatsapp_support_link','trial_ai_credits','ai_credit_cost_study','ai_credit_cost_support','brand_powered_by'];
+    var fields=['support_email','telegram','telegram_channel','instagram','youtube','whatsapp_channel','whatsapp_support_enabled','whatsapp_support_link','trial_ai_credits','ai_credit_cost_study','ai_credit_cost_support','ai_credit_cost_help','brand_powered_by'];
     qs('#sf').innerHTML='<div class="grid2">'+fields.map(function(f){
       var v=s[f]!==undefined?s[f]:'';
       if(f==='whatsapp_support_enabled')return '<div class="field"><label>'+f+'</label><select class="input" data-k="'+f+'"><option value="0"'+(v==='0'?' selected':'')+'>OFF (default)</option><option value="1"'+(v==='1'?' selected':'')+'>ON</option></select></div>';
@@ -364,6 +365,63 @@
       var out={};qsa('[data-k]',m).forEach(function(el){out[el.getAttribute('data-k')]=el.value;});
       try{await api('POST','/admin/settings',{settings:out});toast('Settings saved','ok');}catch(e){toast(e.message,'err');}
     });
+  }
+
+  /* ---------- Credit packs ---------- */
+  async function packs(){
+    var m=qs('#main');
+    m.innerHTML='<div class="row between mb12"><div class="dim small">AI credit bundles sold for cash — separate ledger from the Store Wallet.</div>'+
+      '<button class="btn" id="add-pack">'+icon('plus')+' New pack</button></div>'+
+      '<div class="card pad0"><div class="tablewrap" id="pkt"><div class="spinner"></div></div></div>';
+    async function load(){
+      try{
+        var list=(await api('GET','/admin/credits/packs')).packs||[];
+        qs('#pkt').innerHTML=list.length?('<table><thead><tr><th>Code</th><th>Name</th><th>Credits</th><th>Bonus</th><th>Price</th><th>Active</th><th></th></tr></thead><tbody>'+
+          list.map(function(p){
+            return '<tr><td class="mono">'+esc(p.code)+'</td><td>'+esc(p.name)+'</td><td>'+p.credits+'</td><td>'+(p.bonus_credits||0)+'</td>'+
+            '<td class="mono">'+money(p.price_paise,p.currency)+'</td><td><span class="badge '+(p.is_active?'green':'slate')+'">'+(p.is_active?'yes':'no')+'</span></td>'+
+            '<td style="white-space:nowrap"><button class="btn sm soft" data-edit="'+p.id+'">Edit</button> '+
+            '<button class="btn sm ghost" data-arch="'+p.id+'">'+(p.is_active?'Archive':'Restore')+'</button></td></tr>';
+          }).join('')+'</tbody></table>'):'<div class="muted" style="padding:16px">No credit packs yet.</div>';
+        qsa('[data-edit]',m).forEach(function(b){b.addEventListener('click',function(){
+          edit(list.filter(function(x){return String(x.id)===String(b.getAttribute('data-edit'));})[0]);});});
+        qsa('[data-arch]',m).forEach(function(b){b.addEventListener('click',async function(){
+          var p=list.filter(function(x){return String(x.id)===String(b.getAttribute('data-arch'));})[0];
+          try{await api('PATCH','/admin/credits/packs/'+p.id,{is_active:p.is_active?0:1});toast('Pack updated','ok');load();}
+          catch(e){toast(e.message,'err');}
+        });});
+      }catch(e){qs('#pkt').innerHTML='<div class="badge red">'+esc(e.message)+'</div>';}
+    }
+    function edit(p){
+      var isNew=!p;
+      p=p||{code:'',name:'',credits:100,bonus_credits:0,price_paise:19900,currency:'INR'};
+      var mm=modal(isNew?'New credit pack':'Edit pack',
+        '<div class="grid2">'+
+        '<div class="field"><label>Name</label><input class="input" id="pk-name" value="'+esc(p.name)+'" placeholder="Starter 100"></div>'+
+        '<div class="field"><label>Code</label><input class="input" id="pk-code" value="'+esc(p.code)+'" placeholder="pack_starter"'+(isNew?'':' disabled')+'></div>'+
+        '<div class="field"><label>Credits</label><input class="input" id="pk-credits" type="number" min="1" value="'+p.credits+'"></div>'+
+        '<div class="field"><label>Bonus credits</label><input class="input" id="pk-bonus" type="number" min="0" value="'+(p.bonus_credits||0)+'"></div>'+
+        '<div class="field"><label>Price (₹)</label><input class="input" id="pk-price" type="number" min="1" step="0.01" value="'+((p.price_paise||0)/100)+'"></div>'+
+        '</div><div class="tiny muted">Purchases settle server-side via Cashfree before credits are granted.</div>',
+        '<div class="row gap8" style="justify-content:flex-end;margin-top:14px"><button class="btn ghost" data-cancel>Cancel</button><button class="btn" data-save>Save</button></div>');
+      qs('[data-cancel]',mm.el).addEventListener('click',mm.close);
+      qs('[data-save]',mm.el).addEventListener('click',async function(){
+        var body={
+          name:qs('#pk-name',mm.el).value.trim(),
+          credits:parseInt(qs('#pk-credits',mm.el).value||'0',10),
+          bonus_credits:parseInt(qs('#pk-bonus',mm.el).value||'0',10),
+          price_paise:Math.round(parseFloat(qs('#pk-price',mm.el).value||'0')*100)
+        };
+        if(isNew)body.code=qs('#pk-code',mm.el).value.trim();
+        if(!body.name||body.credits<=0||body.price_paise<=0){toast('Name, credits and price are required','err');return;}
+        try{
+          await api(isNew?'POST':'PATCH',isNew?'/admin/credits/packs':'/admin/credits/packs/'+p.id,body);
+          toast('Pack saved','ok');mm.close();load();
+        }catch(e){toast(e.message,'err');}
+      });
+    }
+    qs('#add-pack',m).addEventListener('click',function(){edit(null);});
+    load();
   }
 
   /* ---------- Audit ---------- */

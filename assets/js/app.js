@@ -16,6 +16,7 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
 
   /* ================= boot ================= */
   async function boot() {
+    var t0 = Date.now();
     EL.ui.theme.apply();
     buildShell();
     EL.auth.onChange(function () { EL.ui.dispatch(); refreshUnread(); });
@@ -30,13 +31,26 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
     }
     refreshUnread();
     setInterval(refreshUnread, 30000);
+    finishSplash(t0);
+  }
+
+  /** Hide the boot splash once the app is ready (min. dwell for polish). */
+  function finishSplash(t0) {
+    t0 = t0 || Date.now();
+    var wait = Math.max(0, 850 - (Date.now() - t0));
+    setTimeout(function () {
+      var s = document.getElementById('splash');
+      if (!s || s.classList.contains('gone')) return;
+      s.classList.add('gone');
+      setTimeout(function () { if (s.parentNode) s.parentNode.removeChild(s); }, 600);
+    }, wait);
   }
 
   function buildShell() {
     document.body.innerHTML =
       '<div class="app">' +
         '<header class="topbar">' +
-          '<div class="brand"><div class="brand-mark">EL</div>' +
+          '<div class="brand"><img class="brand-mark" src="/assets/img/mark.svg" alt="">' +
             '<div class="brand-name">ExamLegacy<small>' + EL.esc(EL.state.config.brand_powered_by || 'SANJAYXLEGACY') + '</small></div>' +
           '</div>' +
           '<button class="icon-btn" id="btn-theme" aria-label="Toggle theme">' + EL.ui.icon('moon') + '</button>' +
@@ -49,7 +63,7 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
 
     // Side rail (desktop)
     EL.qs('#siderail').innerHTML =
-      '<div class="rail-brand"><div class="brand-mark">EL</div><div class="brand-name">ExamLegacy<small>' + EL.esc(EL.state.config.brand_powered_by || '') + '</small></div></div>' +
+      '<div class="rail-brand"><img class="brand-mark" src="/assets/img/mark.svg" alt=""><div class="rail-brand-name brand-name">ExamLegacy<small>' + EL.esc(EL.state.config.brand_powered_by || '') + '</small></div></div>' +
       EL.ui.NAV.map(function (n) {
         return '<button class="railitem" data-nav="' + n.name + '">' + EL.ui.icon(n.icon) + '<span>' + n.label + '</span></button>';
       }).join('');
@@ -59,6 +73,12 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
 
     EL.qs('#btn-theme').addEventListener('click', cycleTheme);
     EL.qs('#btn-notif').addEventListener('click', function () { EL.ui.navigate('notifications'); });
+
+    // Frosted topbar on scroll (progressive enhancement).
+    var topbar = EL.qs('.topbar');
+    window.addEventListener('scroll', function () {
+      if (topbar) topbar.classList.toggle('scrolled', (window.scrollY || 0) > 8);
+    }, { passive: true });
   }
 
   function cycleTheme() {
@@ -98,7 +118,7 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
     EL.qsa('[data-nav]', nav).forEach(function (b) {
       var name = b.getAttribute('data-nav');
       var existing = EL.qs('.badge', b);
-      if (name === 'support' && unread > 0) {
+      if (name === 'account' && unread > 0) {
         if (existing) existing.textContent = unread;
         else b.insertAdjacentHTML('beforeend', '<span class="badge">' + unread + '</span>');
       } else if (existing) existing.remove();
@@ -117,7 +137,8 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
     EL.ui.def('home', screenHome);
     EL.ui.def('store', screenStore);
     EL.ui.def('product', screenProduct);
-    EL.ui.def('library', function (c) { if (requireAuth()) screenLibrary(c); });
+    EL.ui.def('vault', function (c) { if (requireAuth()) screenVault(c); });
+    EL.ui.def('library', function (c) { if (requireAuth()) screenVault(c); }); // legacy alias
     EL.ui.def('study', function (c) { if (requireAuth()) screenStudy(c); });
     EL.ui.def('support', function (c) { if (requireAuth()) screenSupport(c); });
     EL.ui.def('account', function (c) { if (requireAuth()) screenAccount(c); });
@@ -346,7 +367,7 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
         var res = await EL.api.post('/orders', payload);
         if (res.order.status === 'paid') {
           sheet.close(); EL.ui.toast('Purchase complete! Added to your library.', 'ok');
-          EL.ui.navigate('library');
+          EL.ui.navigate('vault');
         } else if (res.payment && res.payment.payment_session_id) {
           sheet.close();
           await launchGateway(res.payment, 'order');
@@ -387,7 +408,7 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
             clearInterval(timer);
             EL.ui.toast('Payment verified!', 'ok');
             await EL.auth.refreshProfile();
-            if (kind === 'order') EL.ui.navigate('library');
+            if (kind === 'order') EL.ui.navigate('vault');
             else EL.ui.navigate('account');
           } else if (r.status === 'failed' || tries > 60) {
             clearInterval(timer); EL.ui.toast('Payment not completed.', 'err');
@@ -406,17 +427,17 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
   }
 
   /* ================= LIBRARY ================= */
-  async function screenLibrary(c) {
-    c.innerHTML = '<div class="section"><h2>My Library</h2></div>' + EL.ui.loading(6);
+  async function screenVault(c) {
+    c.innerHTML = '<div class="section"><h2>Legacy Vault</h2><span class="tiny muted">Everything you own — private, watermarked, instant.</span></div>' + EL.ui.loading(6);
     try {
       var items = (await EL.api.get('/library')).items || [];
       if (!items.length) {
-        c.innerHTML = '<div class="section"><h2>My Library</h2></div>' +
-          EL.ui.empty({ icon: 'book', title: 'Your library is empty', text: 'Purchased PDFs appear here securely.', actionLabel: 'Browse the Store', action: 'store' });
+        c.innerHTML = '<div class="section"><h2>Legacy Vault</h2></div>' +
+          EL.ui.empty({ icon: 'shield-halved', title: 'Your vault is empty', text: 'Purchased PDFs land here instantly — private and secure.', actionLabel: 'Browse the Store', action: 'store' });
         var b = EL.qs('[data-act]', c); if (b) b.addEventListener('click', function () { EL.ui.navigate('store'); });
         return;
       }
-      c.innerHTML = '<div class="section"><h2>My Library</h2><span class="tiny muted">' + items.length + ' documents</span></div>' +
+      c.innerHTML = '<div class="section"><h2>Legacy Vault</h2><span class="tiny muted">' + items.length + ' documents</span></div>' +
         '<div class="card pad-0">' + items.map(function (it) {
           return '<div class="rowitem" data-read="' + it.product_id + '" data-title="' + EL.esc(it.title) + '">' +
             '<div class="lead">' + EL.ui.icon('book') + '</div>' +
@@ -434,101 +455,223 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
   async function screenStudy(c) {
     var credits = 0;
     try { credits = (await EL.api.get('/credits')).balance; } catch (e) {}
+    var msgs = [];            // {role:'user'|'ai', text, err?}
+    var busy = false;
+    var source = { type: '', label: 'Ask anything', product_id: 0, document_id: 0, text: '' };
+    var TASKS = [
+      ['concept', 'Explain concept'], ['solve', 'Solve question'], ['mcq', 'Make MCQs'],
+      ['short', 'Short answer'], ['long', 'Long answer'], ['exam', 'Exam answer'],
+      ['notes', 'Notes'], ['revision', 'Quick revision'], ['flashcards', 'Flashcards'],
+      ['mock', 'Mock test'], ['weak', 'Weak topics'], ['analyze', 'Analyze']
+    ];
+    var task = 'concept';
+
     c.innerHTML =
       '<div class="section"><h2>Study AI</h2><span class="badge blue" id="credits-badge">' + credits + ' credits</span></div>' +
-      '<div class="card">' +
-        '<div class="field"><label>Study source</label>' +
-          '<div class="segmented" id="src-tabs" style="width:100%">' +
-            '<button data-src="library" class="active" style="flex:1">My PDFs</button>' +
-            '<button data-src="upload" style="flex:1">Upload</button>' +
-            '<button data-src="text" style="flex:1">Paste text</button>' +
-          '</div></div>' +
-        '<div id="src-panel"></div>' +
-        '<div class="field"><label>Task</label><select class="input" id="task">' +
-          ['concept:Explain concept', 'solve:Solve question', 'mcq:Make MCQs', 'short:Short answer', 'long:Long answer',
-           'exam:Exam answer', 'notes:Notes', 'revision:Quick revision', 'flashcards:Flashcards', 'mock:Mock test', 'weak:Weak topics', 'analyze:Analyze']
-            .map(function (o) { var p = o.split(':'); return '<option value="' + p[0] + '">' + p[1] + '</option>'; }).join('') +
-        '</select></div>' +
-        '<div class="field"><label>Your question / instruction</label><textarea class="input" id="q" placeholder="e.g. Explain Newton&#39;s second law with an example"></textarea></div>' +
-        '<button class="btn block" id="ask">' + EL.ui.icon('robot') + ' Ask Study AI</button>' +
-      '</div>' +
-      '<div id="answer" class="mt-16"></div>';
+      '<div class="chat" id="chat" aria-live="polite"></div>' +
+      '<div class="composer">' +
+        '<div class="composer-meta">' +
+          '<button class="chip active" id="src-btn">' + EL.ui.icon('layer-group') + ' <span id="src-label">Ask anything</span> ' + EL.ui.icon('chevron-down') + '</button>' +
+          '<button class="chip" id="task-btn">' + EL.ui.icon('sliders') + ' <span id="task-label">Explain concept</span></button>' +
+        '</div>' +
+        '<div class="composer-row">' +
+          '<textarea id="q" rows="1" placeholder="Message Study AI — any subject, any exam…" aria-label="Message Study AI"></textarea>' +
+          '<button class="btn send" id="ask" aria-label="Send message">' + EL.ui.icon('paper-plane') + '</button>' +
+        '</div>' +
+        '<div class="composer-hint tiny muted">AI can make mistakes — verify important answers.</div>' +
+      '</div>';
 
-    var source = { type: 'library', product_id: 0, document_id: 0, text: '' };
-    var panel = EL.qs('#src-panel', c);
+    var chatEl = EL.qs('#chat', c);
+    var input = EL.qs('#q', c);
+    var sendBtn = EL.qs('#ask', c);
 
-    async function renderPanel() {
-      if (source.type === 'library') {
-        panel.innerHTML = '<div class="field"><label>Choose a purchased PDF</label><select class="input" id="lib-sel"><option value="">Loading…</option></select></div>';
+    function renderChat(showTyping) {
+      var html = '';
+      if (!msgs.length) {
+        html =
+          '<div class="chat-empty">' +
+            '<img class="chat-avatar-lg" src="/assets/img/mark.svg" alt="">' +
+            '<div class="chat-hi">Ask me anything — any subject, any exam.</div>' +
+            '<div class="chat-sugs">' +
+              ['Explain Newton\'s laws with examples', 'Make 5 MCQs on Thermodynamics',
+               'Difference between mitosis and meiosis', 'Quick revision: Indian Constitution']
+                .map(function (s) { return '<button class="chip sug" data-sug="' + EL.esc(s) + '">' + EL.esc(s) + '</button>'; }).join('') +
+            '</div>' +
+          '</div>';
+      } else {
+        html = msgs.map(function (m, i) {
+          var d = 'style="animation-delay:' + Math.min(i * 30, 150) + 'ms"';
+          if (m.role === 'user') {
+            return '<div class="msg user" ' + d + '><div class="bubble">' + EL.esc(m.text).replace(/\n/g, '<br>') + '</div></div>';
+          }
+          if (m.err) {
+            return '<div class="msg ai" ' + d + '><img class="avatar" src="/assets/img/mark.svg" alt="">' +
+              '<div class="bubble err">' + EL.ui.icon('triangle-exclamation') + ' ' + EL.esc(m.text) + '</div></div>';
+          }
+          return '<div class="msg ai" ' + d + '><img class="avatar" src="/assets/img/mark.svg" alt="">' +
+            '<div class="bubble">' + EL.ui.md(m.text) + '</div></div>';
+        }).join('');
+        if (showTyping) {
+          html += '<div class="msg ai" id="typing"><img class="avatar" src="/assets/img/mark.svg" alt="">' +
+            '<div class="bubble typing" aria-label="Study AI is typing"><i></i><i></i><i></i></div></div>';
+        }
+      }
+      chatEl.innerHTML = html;
+      typeset(chatEl);
+      chatEl.scrollTop = chatEl.scrollHeight;
+      EL.qsa('[data-sug]', chatEl).forEach(function (b) {
+        b.addEventListener('click', function () { input.value = b.getAttribute('data-sug'); send(); });
+      });
+    }
+
+    function syncLabels() {
+      var sl = EL.qs('#src-label', c); if (sl) sl.textContent = source.label;
+      var tl = EL.qs('#task-label', c);
+      if (tl) { var t = TASKS.filter(function (x) { return x[0] === task; })[0]; tl.textContent = t ? t[1] : 'Explain concept'; }
+    }
+
+    function openSourceSheet() {
+      var opts = [
+        { id: '', label: 'Ask anything', desc: 'All-in-one study chat — no purchase needed', icon: 'comments' },
+        { id: 'library', label: 'My purchased PDFs', desc: 'Ground answers in your Legacy Vault', icon: 'vault' },
+        { id: 'upload', label: 'Upload a file', desc: 'PDF or image up to 15 MB — fully private', icon: 'upload' },
+        { id: 'text', label: 'Paste text', desc: 'Answer from your pasted notes', icon: 'clipboard' }
+      ];
+      var s = EL.ui.sheet({
+        title: 'Study source', sub: 'Study AI works for every question — material optional.',
+        body: opts.map(function (o) {
+          return '<div class="rowitem" data-src="' + o.id + '"><div class="lead">' + EL.ui.icon(o.icon) + '</div>' +
+            '<div class="grow"><div class="t">' + o.label + '</div><div class="s">' + o.desc + '</div></div>' +
+            (source.type === o.id ? '<div class="chev">' + EL.ui.icon('check') + '</div>' : '') + '</div>';
+        }).join('') + '<div id="src-extra" class="mt-16"></div>',
+        actions: [{ label: 'Close', variant: 'ghost', onClick: function () {} }]
+      });
+      EL.qsa('[data-src]', s.el).forEach(function (row) {
+        row.addEventListener('click', function () { pick(row.getAttribute('data-src'), s); });
+      });
+    }
+
+    async function pick(id, s) {
+      var extra = EL.qs('#src-extra', s.el);
+      if (id === '') {
+        source = { type: '', label: 'Ask anything', product_id: 0, document_id: 0, text: '' };
+        s.close(); syncLabels(); return;
+      }
+      if (id === 'library') {
+        extra.innerHTML = '<div class="field"><label>Choose a purchased PDF</label><select class="input" id="lib-sel"><option value="">Loading…</option></select></div>';
         try {
           var items = (await EL.api.get('/library')).items || [];
-          EL.qs('#lib-sel', panel).innerHTML = items.length
+          EL.qs('#lib-sel', extra).innerHTML = items.length
             ? items.map(function (it) { return '<option value="' + it.product_id + '">' + EL.esc(it.title) + '</option>'; }).join('')
-            : '<option value="">No purchased PDFs — buy one first</option>';
-        } catch (e) { EL.qs('#lib-sel', panel).innerHTML = '<option value="">Could not load library</option>'; }
-      } else if (source.type === 'upload') {
-        panel.innerHTML = '<div class="field"><label>Upload a PDF or image (max 15MB)</label><input class="input" id="up" type="file" accept="application/pdf,image/png,image/jpeg,image/webp"></div>' +
-          '<div class="tiny muted" id="up-status">Your upload is private and used only by you.</div>';
-        EL.qs('#up', panel).addEventListener('change', async function (e) {
+            : '<option value="">No purchased PDFs yet — buy one from the Store</option>';
+          EL.qs('#lib-sel', extra).addEventListener('change', function (e) {
+            var pid = parseInt(e.target.value || '0', 10);
+            if (!pid) return;
+            var title = e.target.options[e.target.selectedIndex].text;
+            source = { type: 'library', label: title.length > 22 ? title.slice(0, 20) + '…' : title, product_id: pid, document_id: 0, text: '' };
+            s.close(); syncLabels();
+          });
+        } catch (e) { extra.innerHTML = '<div class="tiny muted">Could not load your Vault.</div>'; }
+        return;
+      }
+      if (id === 'upload') {
+        extra.innerHTML = '<div class="field"><label>Upload a PDF or image (max 15MB)</label>' +
+          '<input class="input" id="up" type="file" accept="application/pdf,image/png,image/jpeg,image/webp"></div>' +
+          '<div class="tiny muted" id="up-status">Private — used only for your questions.</div>';
+        EL.qs('#up', extra).addEventListener('change', async function (e) {
           var f = e.target.files[0]; if (!f) return;
-          EL.qs('#up-status', panel).textContent = 'Uploading…';
+          EL.qs('#up-status', extra).textContent = 'Uploading…';
           try {
             var doc = await EL.api.upload('/uploads', f, 'file');
-            source.document_id = doc.id; source.type = 'upload';
-            EL.qs('#up-status', panel).textContent = 'Ready: ' + doc.filename;
-          } catch (err) { EL.qs('#up-status', panel).textContent = err.message; }
+            source = { type: 'upload', label: (doc.filename || 'file').slice(0, 20), product_id: 0, document_id: doc.id, text: '' };
+            EL.qs('#up-status', extra).textContent = 'Ready: ' + doc.filename;
+            setTimeout(function () { s.close(); syncLabels(); }, 500);
+          } catch (err) { EL.qs('#up-status', extra).textContent = err.message; }
         });
-      } else {
-        panel.innerHTML = '<div class="field"><label>Paste study text</label><textarea class="input" id="paste" placeholder="Paste notes or a passage…"></textarea></div>';
+        return;
+      }
+      if (id === 'text') {
+        extra.innerHTML = '<div class="field"><label>Paste study text</label><textarea class="input" id="paste" placeholder="Paste notes or a passage…">' + EL.esc(source.type === 'text' ? source.text : '') + '</textarea></div>' +
+          '<button class="btn block" id="use-text">Use this text</button>';
+        EL.qs('#use-text', extra).addEventListener('click', function () {
+          var v = EL.qs('#paste', extra).value.trim();
+          if (!v) { EL.ui.toast('Paste some text first', 'err'); return; }
+          source = { type: 'text', label: 'Pasted text', product_id: 0, document_id: 0, text: v };
+          s.close(); syncLabels();
+        });
       }
     }
-    EL.qsa('#src-tabs button', c).forEach(function (b) {
-      b.addEventListener('click', function () {
-        EL.qsa('#src-tabs button', c).forEach(function (x) { x.classList.remove('active'); });
-        b.classList.add('active'); source.type = b.getAttribute('data-src'); renderPanel();
-      });
-    });
-    renderPanel();
 
-    EL.qs('#ask', c).addEventListener('click', async function () {
-      var q = EL.qs('#q', c).value.trim();
-      var payload = { question: q, task: EL.qs('#task', c).value, source_type: source.type };
-      if (source.type === 'library') {
-        payload.product_id = parseInt(EL.qs('#lib-sel', panel).value || '0', 10);
-        if (!payload.product_id) { EL.ui.toast('Choose a PDF from your library', 'err'); return; }
-      } else if (source.type === 'upload') {
-        payload.document_id = source.document_id;
-        if (!payload.document_id) { EL.ui.toast('Upload a file first', 'err'); return; }
-      } else {
-        payload.text = EL.qs('#paste', c).value;
-      }
-      var out = EL.qs('#answer', c);
-      out.innerHTML = '<div class="card"><div class="flex center gap-12"><div class="spinner"></div><span class="dim">Study AI is thinking…</span></div></div>';
-      EL.qs('#ask', c).disabled = true;
+    function openTaskSheet() {
+      var s = EL.ui.sheet({
+        title: 'Answer style', sub: 'How should Study AI respond?',
+        body: TASKS.map(function (t) {
+          return '<div class="rowitem" data-task="' + t[0] + '"><div class="grow"><div class="t">' + t[1] + '</div></div>' +
+            (task === t[0] ? '<div class="chev">' + EL.ui.icon('check') + '</div>' : '') + '</div>';
+        }).join(''),
+        actions: [{ label: 'Close', variant: 'ghost', onClick: function () {} }]
+      });
+      EL.qsa('[data-task]', s.el).forEach(function (row) {
+        row.addEventListener('click', function () { task = row.getAttribute('data-task'); s.close(); syncLabels(); });
+      });
+    }
+
+    async function send() {
+      var q = input.value.trim();
+      if (!q || busy) return;
+      busy = true; sendBtn.disabled = true;
+      input.value = ''; input.style.height = 'auto';
+      var history = msgs.filter(function (m) { return !m.err; }).slice(-8).map(function (m) {
+        return { role: m.role === 'user' ? 'user' : 'model', text: m.text };
+      });
+      msgs.push({ role: 'user', text: q });
+      renderChat(true);
+      var payload = { question: q, task: task, history: history };
+      if (source.type === 'library') { payload.source_type = 'library'; payload.product_id = source.product_id; }
+      else if (source.type === 'upload') { payload.source_type = 'upload'; payload.document_id = source.document_id; }
+      else if (source.type === 'text') { payload.source_type = 'text'; payload.text = source.text; }
+      // No source_type => all-in-one general chat (backend default).
       try {
         var r = await EL.api.post('/ai/study', payload);
-        out.innerHTML = '<div class="card"><div class="flex between center" style="margin-bottom:8px">' +
-          '<span class="badge blue">' + EL.esc(r.task) + '</span><span class="tiny muted">-' + r.credits_spent + ' credits · ' + r.balance + ' left</span></div>' +
-          '<div style="white-space:pre-wrap">' + EL.esc(r.answer) + '</div></div>';
+        msgs.push({ role: 'ai', text: r.answer });
         EL.qs('#credits-badge', c).textContent = r.balance + ' credits';
-        typeset(out);
       } catch (e) {
-        out.innerHTML = EL.ui.errorBox(e.message);
-      } finally { EL.qs('#ask', c).disabled = false; }
+        msgs.push({ role: 'ai', text: e.message, err: true });
+      } finally {
+        busy = false; sendBtn.disabled = false;
+        renderChat(false);
+        input.focus();
+      }
+    }
+
+    renderChat(false);
+    syncLabels();
+    sendBtn.addEventListener('click', send);
+    EL.qs('#src-btn', c).addEventListener('click', openSourceSheet);
+    EL.qs('#task-btn', c).addEventListener('click', openTaskSheet);
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    });
+    input.addEventListener('input', function () {
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight, 140) + 'px';
     });
   }
 
   /* ================= SUPPORT ================= */
   async function screenSupport(c) {
     c.innerHTML =
-      '<div class="section"><h2>Support Center</h2></div>' +
+      '<div class="section"><h2>Help &amp; Support</h2></div>' +
+      '<p class="dim small" style="margin:-6px 0 14px">Deposits, orders, PDF access, wallet &amp; account issues — Support AI checks your real data instantly; humans are one tap away.</p>' +
       '<div class="segmented" id="sup-tabs" style="width:100%;margin-bottom:16px">' +
-        '<button data-tab="ai" class="active" style="flex:1">AI Help</button>' +
-        '<button data-tab="human" style="flex:1">Talk to a human</button>' +
+        '<button data-tab="support" class="active" style="flex:1">Support AI</button>' +
+        '<button data-tab="help" style="flex:1">Help AI</button>' +
+        '<button data-tab="human" style="flex:1">Tickets</button>' +
       '</div>' +
       '<div id="sup-panel"></div>';
-    var tab = 'ai';
+    var tab = 'support';
     var panel = EL.qs('#sup-panel', c);
+    var chats = { support: [], help: [] };
     EL.qsa('#sup-tabs button', c).forEach(function (b) {
       b.addEventListener('click', function () {
         EL.qsa('#sup-tabs button', c).forEach(function (x) { x.classList.remove('active'); });
@@ -536,37 +679,98 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
       });
     });
     function renderSupport() {
-      if (tab === 'ai') renderSupportAi();
-      else renderHuman();
+      if (tab === 'human') renderHuman();
+      else renderAiChat();
     }
-    function renderSupportAi() {
+    function renderAiChat() {
+      var isSupport = tab === 'support';
       panel.innerHTML =
-        '<div class="card">' +
-          '<div class="field"><label>Ask Support AI (account, orders, payments, wallet, PDF access)</label>' +
-          '<textarea class="input" id="sup-q" placeholder="e.g. Why can&#39;t I open my PDF?"></textarea></div>' +
-          '<button class="btn block" id="sup-ask">' + EL.ui.icon('headset') + ' Ask Support AI</button>' +
-          '<div class="divider"></div>' +
-          '<div class="field"><label>Or ask Help AI for general guidance</label>' +
-          '<input class="input" id="help-q" placeholder="e.g. How does the Wallet work?"></div>' +
-          '<button class="btn soft block" id="help-ask">' + EL.ui.icon('circle-question') + ' Ask Help AI</button>' +
-        '</div><div id="sup-out" class="mt-16"></div>';
-      EL.qs('#sup-ask', panel).addEventListener('click', async function () {
-        var q = EL.qs('#sup-q', panel).value.trim(); if (!q) return;
-        await askAi('/ai/support', { message: q }, panel);
+        '<div class="chat" id="sup-chat" aria-live="polite"></div>' +
+        '<div class="composer">' +
+          '<div class="composer-row">' +
+            '<textarea id="sup-q" rows="1" placeholder="' + (isSupport ? 'e.g. Why is my deposit still pending?' : 'e.g. How does the Wallet work?') + '" aria-label="Message"></textarea>' +
+            '<button class="btn send" id="sup-ask" aria-label="Send">' + EL.ui.icon('paper-plane') + '</button>' +
+          '</div>' +
+          '<div class="composer-hint tiny muted">' +
+            (isSupport ? 'Support AI verifies your orders, payments, wallet & PDF access.' : 'Help AI: general guidance about the platform.') +
+          '</div>' +
+        '</div>';
+      var chatEl = EL.qs('#sup-chat', panel);
+      var input = EL.qs('#sup-q', panel);
+      var btn = EL.qs('#sup-ask', panel);
+      var busy = false;
+
+      function paint(typing) {
+        var list = chats[tab] || [];
+        var html = '';
+        if (!list.length) {
+          var sugs = isSupport
+            ? ['Why is my deposit pending?', 'My PDF won\'t open', 'Where are my AI credits?', 'Order payment status?']
+            : ['How does the Wallet work?', 'What is VIP PASS?', 'How do AI credits work?', 'How do purchases work?'];
+          html =
+            '<div class="chat-empty">' +
+              '<img class="chat-avatar-lg" src="/assets/img/mark.svg" alt="">' +
+              '<div class="chat-hi">' + (isSupport
+                ? 'Hi! I can check your deposits, orders, PDF access and wallet in seconds.'
+                : 'Ask anything about how ExamLegacy works.') + '</div>' +
+              '<div class="chat-sugs">' + sugs.map(function (s) {
+                return '<button class="chip sug" data-sug="' + EL.esc(s) + '">' + EL.esc(s) + '</button>';
+              }).join('') + '</div>' +
+            '</div>';
+        } else {
+          html = list.map(function (m, i) {
+            var d = 'style="animation-delay:' + Math.min(i * 30, 150) + 'ms"';
+            if (m.role === 'user') {
+              return '<div class="msg user" ' + d + '><div class="bubble">' + EL.esc(m.text).replace(/\n/g, '<br>') + '</div></div>';
+            }
+            if (m.err) {
+              return '<div class="msg ai" ' + d + '><img class="avatar" src="/assets/img/mark.svg" alt="">' +
+                '<div class="bubble err">' + EL.ui.icon('triangle-exclamation') + ' ' + EL.esc(m.text) + '</div></div>';
+            }
+            return '<div class="msg ai" ' + d + '><img class="avatar" src="/assets/img/mark.svg" alt="">' +
+              '<div class="bubble">' + EL.ui.md(m.text) + '</div></div>';
+          }).join('');
+          if (typing) {
+            html += '<div class="msg ai"><img class="avatar" src="/assets/img/mark.svg" alt="">' +
+              '<div class="bubble typing"><i></i><i></i><i></i></div></div>';
+          }
+        }
+        chatEl.innerHTML = html;
+        typeset(chatEl);
+        chatEl.scrollTop = chatEl.scrollHeight;
+        EL.qsa('[data-sug]', chatEl).forEach(function (b) {
+          b.addEventListener('click', function () { input.value = b.getAttribute('data-sug'); send(); });
+        });
+      }
+
+      async function send() {
+        var q = input.value.trim();
+        if (!q || busy) return;
+        busy = true; btn.disabled = true;
+        input.value = ''; input.style.height = 'auto';
+        (chats[tab] = chats[tab] || []).push({ role: 'user', text: q });
+        paint(true);
+        try {
+          var r = await EL.api.post(isSupport ? '/ai/support' : '/ai/help', { message: q });
+          chats[tab].push({ role: 'ai', text: r.answer });
+        } catch (e) {
+          chats[tab].push({ role: 'ai', text: e.message, err: true });
+        } finally {
+          busy = false; btn.disabled = false;
+          paint(false);
+          input.focus();
+        }
+      }
+
+      paint(false);
+      btn.addEventListener('click', send);
+      input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
       });
-      EL.qs('#help-ask', panel).addEventListener('click', async function () {
-        var q = EL.qs('#help-q', panel).value.trim(); if (!q) return;
-        await askAi('/ai/help', { message: q }, panel);
+      input.addEventListener('input', function () {
+        input.style.height = 'auto';
+        input.style.height = Math.min(input.scrollHeight, 140) + 'px';
       });
-    }
-    async function askAi(path, body, root) {
-      var out = EL.qs('#sup-out', root);
-      out.innerHTML = '<div class="card"><div class="flex center gap-12"><div class="spinner"></div><span class="dim">Thinking…</span></div></div>';
-      try {
-        var r = await EL.api.post(path, body);
-        out.innerHTML = '<div class="card" style="white-space:pre-wrap">' + EL.esc(r.answer) + '</div>';
-        typeset(out);
-      } catch (e) { out.innerHTML = EL.ui.errorBox(e.message); }
     }
     async function renderHuman() {
       panel.innerHTML = EL.ui.loading(2);
@@ -672,7 +876,7 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
     });
 
     var menu = [
-      { icon: 'book', label: 'My Library', go: 'library' },
+      { icon: 'vault', label: 'Legacy Vault', go: 'vault' },
       { icon: 'crown', label: 'VIP PASS', act: 'vip' },
       { icon: 'palette', label: 'Appearance', act: 'appearance' },
       { icon: 'bell', label: 'Notifications', go: 'notifications' },
@@ -829,7 +1033,7 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
       cfg.whatsapp_channel ? ['whatsapp', 'WhatsApp channel', cfg.whatsapp_channel] : null
     ].filter(Boolean);
     var body =
-      '<div class="card"><div class="flex center gap-12"><div class="brand-mark" style="width:44px;height:44px">EL</div>' +
+      '<div class="card"><div class="flex center gap-12"><img class="brand-mark" src="/assets/img/mark.svg" alt="" style="width:44px;height:44px">' +
       '<div><div class="b">ExamLegacy</div><div class="tiny muted">' + EL.esc(cfg.brand_powered_by || 'SANJAYXLEGACY') + ' Powered By</div></div></div>' +
       '<p class="dim small mt-16">A premium digital education platform: secure PDF store, private library, in-app viewer and an AI study tutor.</p></div>' +
       '<div class="section"><h2>Connect</h2></div><div class="card pad-0">' +
@@ -897,7 +1101,7 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
     var c = EL.qs('#content');
     c.innerHTML =
       '<div class="auth"><div class="panel">' +
-        '<div class="mark">EL</div>' +
+        '<img class="mark" src="/assets/img/logo.svg" alt="ExamLegacy" width="96" height="96">' +
         '<h1>Welcome to ExamLegacy</h1>' +
         '<p>Sign in with Google to access your library, wallet, AI credits and Study AI.</p>' +
         '<button class="btn block lg" id="auth-google">' + EL.ui.icon('brands', 'fab fa-google') + ' Continue with Google</button>' +
@@ -911,5 +1115,10 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
     catch (e) { EL.ui.toast(e.message || 'Sign-in failed', 'err'); }
   }
 
-  document.addEventListener('DOMContentLoaded', boot);
+  document.addEventListener('DOMContentLoaded', function () {
+    boot().catch(function (e) {
+      console.error(e);
+      finishSplash(Date.now() - 2000); // never trap the user behind the splash
+    });
+  });
 })();

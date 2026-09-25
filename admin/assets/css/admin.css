@@ -25,6 +25,7 @@ a{color:var(--primary);text-decoration:none}
 .login{min-height:100dvh;display:grid;place-items:center;padding:24px}
 .login .box{width:100%;max-width:400px;text-align:center}
 .login .mark{width:60px;height:60px;border-radius:16px;margin:0 auto 16px;background:linear-gradient(145deg,var(--primary),var(--accent));display:grid;place-items:center;color:#fff;font-weight:800;font-size:1.4rem}
+.login img.mark{width:84px;height:84px;border-radius:50%;background:none;box-shadow:0 0 0 4px rgba(14,165,233,.18)}
 .login h1{font-size:1.4rem;margin:0 0 6px}
 .login p{color:var(--text-2);margin:0 0 22px}
 
@@ -34,6 +35,7 @@ a{color:var(--primary);text-decoration:none}
 .sidebar.open{transform:translateX(0)}
 .sidebar .logo{display:flex;align-items:center;gap:10px;padding:6px 8px 16px;font-weight:800}
 .sidebar .logo .m{width:32px;height:32px;border-radius:9px;background:linear-gradient(145deg,var(--primary),var(--accent));display:grid;place-items:center;color:#fff;font-size:.85rem}
+.sidebar .logo img.m{border-radius:50%;background:#0a0a0f;object-fit:cover}
 .nav{display:flex;flex-direction:column;gap:2px}
 .nav button{display:flex;align-items:center;gap:11px;width:100%;padding:11px 12px;border:0;background:none;border-radius:12px;color:var(--text-2);font-weight:600;font-size:.92rem;cursor:pointer;text-align:left}
 .nav button i{width:20px;text-align:center}

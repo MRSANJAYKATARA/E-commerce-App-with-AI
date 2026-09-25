@@ -21,8 +21,9 @@ final class StudyAi
     /** Supported study tasks -> concise system guidance. */
     private static function systemFor(string $task): string
     {
-        $base = 'You are ExamLegacy Study AI, a precise, encouraging study tutor for Indian competitive-exam students. '
-              . 'Answer strictly from the provided study material when a document is supplied; if the answer is not in the material, say so and give general guidance. '
+        $base = 'You are ExamLegacy Study AI, a brilliant all-in-one study companion for Indian competitive-exam students (NEET, JEE, Boards, UPSC and more). '
+              . 'You can answer ANY study-related question — any subject, any topic — even without attached material, drawing on your own knowledge accurately and thoroughly. '
+              . 'When study material IS supplied, answer strictly from it; if the answer is not in the material, say so and then give the correct general answer. '
               . 'Use clear structure, headings, and step-by-step reasoning. Prefer the language of the question.';
         $extra = [
             'concept'    => 'Explain the concept simply with an example and a one-line summary.',
@@ -45,9 +46,11 @@ final class StudyAi
      * @param array $source ['type'=>'purchased','product_id'=>int]
      *                     | ['type'=>'upload','document_id'=>int]
      *                     | ['type'=>'text','text'=>string]
+     *                     | [] / general types -> all-in-one chat (no material)
+     * @param array $history prior chat turns [{role:'user'|'model', text:string}] oldest first
      * @return array{answer:string,credits_spent:int,balance:int,usage_id:int,task:string}
      */
-    public static function ask(int $userId, array $source, string $question, string $task = 'concept'): array
+    public static function ask(int $userId, array $source, string $question, string $task = 'concept', array $history = []): array
     {
         $question = trim($question);
         if ($question === '') {
@@ -61,8 +64,16 @@ final class StudyAi
             $task = 'concept';
         }
 
-        // Resolve the authorized source into model parts.
-        [$parts, $meta] = self::resolveSource($userId, $source);
+        // Resolve the authorized source into model parts. No source (or an
+        // explicit "general" request) means all-in-one mode: the tutor answers
+        // from its own knowledge — a purchase is NEVER required to ask.
+        $type = strtolower(trim((string) ($source['type'] ?? '')));
+        $general = in_array($type, ['', 'none', 'general', 'chat', 'ask', 'any'], true);
+        if ($general) {
+            [$parts, $meta] = [[], ['label' => 'general']];
+        } else {
+            [$parts, $meta] = self::resolveSource($userId, $source);
+        }
         $parts[] = Gemini::textPart($question);
 
         $cost = max(0, (int) Settings::get('ai_credit_cost_study', '2'));
@@ -86,7 +97,7 @@ final class StudyAi
         $usageId = Db::insertId();
 
         try {
-            $result = Gemini::generateContent($parts, self::systemFor($task));
+            $result = Gemini::generateContent($parts, self::systemFor($task), null, $history);
         } catch (ApiError $e) {
             Db::run('UPDATE ai_usage SET status = \'error\' WHERE id = ?', [$usageId]);
             throw $e;

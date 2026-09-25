@@ -9,15 +9,29 @@ namespace ExamLegacy;
 final class Gemini
 {
     /** @param array<int,array> $parts content parts (text / inline_data)
+     *  @param array<int,array{role:string,text:string}> $history prior turns (oldest first)
      *  @return array{text:string,input_tokens:int,output_tokens:int}
      */
-    public static function generateContent(array $parts, ?string $systemInstruction = null, ?string $model = null): array
+    public static function generateContent(array $parts, ?string $systemInstruction = null, ?string $model = null, array $history = []): array
     {
         if (GEMINI_API_KEY === '') {
             throw new ApiError('ai_not_configured', 'AI service is not configured', 503);
         }
         $model = $model ?: GEMINI_MODEL;
-        $body = ['contents' => [['role' => 'user', 'parts' => $parts]]];
+        // Multi-turn contents: capped history first, then the current user turn.
+        $contents = [];
+        foreach (array_slice($history, -12) as $turn) {
+            $text = trim((string) ($turn['text'] ?? ''));
+            if ($text === '') {
+                continue;
+            }
+            $contents[] = [
+                'role'  => (($turn['role'] ?? 'user') === 'model') ? 'model' : 'user',
+                'parts' => [['text' => mb_substr($text, 0, 4000)]],
+            ];
+        }
+        $contents[] = ['role' => 'user', 'parts' => $parts];
+        $body = ['contents' => $contents];
         if ($systemInstruction !== null && $systemInstruction !== '') {
             $body['systemInstruction'] = ['parts' => [['text' => $systemInstruction]]];
         }

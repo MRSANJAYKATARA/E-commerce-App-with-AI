@@ -8,13 +8,20 @@
   <title>ExamLegacy — Learn · Practice · Master</title>
 
   <!-- Icons -->
+  <link rel="icon" href="/assets/img/mark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <!-- Design system -->
   <link rel="stylesheet" href="/assets/css/app.css">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f46e5'/%3E%3Ctext x='16' y='22' font-family='Arial' font-size='16' font-weight='bold' fill='white' text-anchor='middle'%3EEL%3C/text%3E%3C/svg%3E">
 </head>
 <body>
-  <!-- App shell is built by assets/js/app.js (buildShell) -->
+  <!-- Boot splash — removed by app.js once the app is ready -->
+  <div id="splash" role="status" aria-label="Loading ExamLegacy">
+    <div class="splash-inner">
+      <img class="splash-logo" src="/assets/img/logo.svg" alt="" width="200" height="200">
+      <div class="splash-sub">SANJAYXLEGACY</div>
+      <div class="splash-bar"><i></i></div>
+    </div>
+  </div>
 
   <!-- Firebase (compat SDK for no-build vanilla JS). Public web config only. -->
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -28,7 +35,7 @@
         displayMath: [['$$', '$$'], ['\\[', '\\]']],
         processEscapes: true
       },
-      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre'] },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'kbd', 'samp', 'var'] },
       startup: { typeset: false }
     };
   </script>
@@ -41,5 +48,7 @@
   <script src="/assets/js/ui.js"></script>
   <script src="/assets/js/viewer.js"></script>
   <script src="/assets/js/app.js"></script>
+  <!-- Safety net: never leave the splash up if boot fails -->
+  <script>setTimeout(function () { var s = document.getElementById('splash'); if (s) s.classList.add('gone'); }, 12000);</script>
 </body>
 </html>

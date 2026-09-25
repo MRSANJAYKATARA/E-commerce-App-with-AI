@@ -98,6 +98,48 @@ EL.ui = (function () {
   }
   function errorBox(msg) { return '<div class="alert err">' + icon('circle-exclamation') + '<div>' + EL.esc(msg) + '</div></div>'; }
 
+  /* ---------------- Mini markdown (AI answers) ----------------
+     Escapes HTML FIRST, then applies a safe subset: headings, bold/italic,
+     inline code, fenced code blocks, bullet & numbered lists, line breaks. */
+  function md(src) {
+    var escd = EL.esc(String(src == null ? '' : src));
+    var blocks = [];
+    // pull out fenced code blocks so they are never re-processed
+    escd = escd.replace(/```([\s\S]*?)```/g, function (_, code) {
+      blocks.push('<pre><code>' + code.replace(/^\n+|\n+$/g, '') + '</code></pre>');
+      return '\u0000CB' + (blocks.length - 1) + '\u0000';
+    });
+    var lines = escd.split('\n');
+    var out = [];
+    var inList = false;
+    var listType = '';
+    function closeList() { if (inList) { out.push('</' + listType + '>'); inList = false; listType = ''; } }
+    for (var i = 0; i < lines.length; i++) {
+      var ln = lines[i];
+      var m = ln.match(/^\u0000CB(\d+)\u0000$/);
+      if (m) { closeList(); out.push(blocks[+m[1]]); continue; }
+      var h = ln.match(/^(#{1,4})\s+(.*)$/);
+      if (h) { closeList(); var lvl = h[1].length + 2; out.push('<h' + lvl + '>' + inline(h[2]) + '</h' + lvl + '>'); continue; }
+      var li = ln.match(/^\s*[-*]\s+(.*)$/);
+      if (li) { if (!inList || listType !== 'ul') { closeList(); out.push('<ul>'); inList = true; listType = 'ul'; } out.push('<li>' + inline(li[1]) + '</li>'); continue; }
+      var ol = ln.match(/^\s*\d+[.)]\s+(.*)$/);
+      if (ol) { if (!inList || listType !== 'ol') { closeList(); out.push('<ol>'); inList = true; listType = 'ol'; } out.push('<li>' + inline(ol[1]) + '</li>'); continue; }
+      closeList();
+      if (ln.trim() === '') { out.push(''); continue; }
+      out.push('<p>' + inline(ln) + '</p>');
+    }
+    closeList();
+    var html = out.join('\n');
+    return html.replace(/\u0000CB(\d+)\u0000/g, function (_, n) { return blocks[+n]; });
+    function inline(t) {
+      return t
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/(^|[\s(])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')
+        .replace(/(^|[\s(])_([^_\s][^_]*)_/g, '$1<em>$2</em>');
+    }
+  }
+
   /* ---------------- Router (hash based) ---------------- */
   var routes = {};
   var current = { name: 'home', params: {} };
@@ -134,6 +176,14 @@ EL.ui = (function () {
     if (content) content.innerHTML = '';
     afterHooks = [];
     try { def_.handler(content, r.params); } catch (e) { console.error(e); if (content) content.innerHTML = errorBox(e.message || 'Failed to load'); }
+    // Staggered entrance for the route's top-level blocks (skipped under
+    // prefers-reduced-motion via CSS).
+    if (content) {
+      Array.prototype.forEach.call(content.children, function (el, i) {
+        el.style.animationDelay = Math.min(i * 45, 260) + 'ms';
+        el.classList.add('rise-in');
+      });
+    }
     renderNav(r.name);
   }
   function onAfter(cb) { afterHooks.push(cb); }
@@ -144,7 +194,7 @@ EL.ui = (function () {
     { name: 'home', label: 'Home', icon: 'home' },
     { name: 'store', label: 'Store', icon: 'store' },
     { name: 'study', label: 'Study AI', icon: 'robot' },
-    { name: 'support', label: 'Support', icon: 'headset' },
+    { name: 'vault', label: 'Vault', icon: 'vault' },
     { name: 'account', label: 'Account', icon: 'user' }
   ];
   function renderNav(active) {
@@ -153,7 +203,7 @@ EL.ui = (function () {
       var unread = (EL.state && EL.state.unread) || 0;
       nav.innerHTML = NAV.map(function (n) {
         var isActive = active === n.name;
-        var badge = (n.name === 'support' && unread > 0) ? '<span class="badge">' + unread + '</span>' : '';
+        var badge = (n.name === 'account' && unread > 0) ? '<span class="badge">' + unread + '</span>' : '';
         return '<button class="navitem ' + (isActive ? 'active' : '') + '" data-nav="' + n.name + '">' +
           icon(n.icon) + '<span>' + n.label + '</span>' + badge + '</button>';
       }).join('');
@@ -173,7 +223,7 @@ EL.ui = (function () {
   return {
     theme: { get: getTheme, set: setTheme, apply: applyTheme },
     toast: toast, sheet: sheet, confirm: confirm, icon: icon,
-    loading: loading, empty: empty, errorBox: errorBox,
+    loading: loading, empty: empty, errorBox: errorBox, md: md,
     def: def, navigate: navigate, dispatch: dispatch, start: start,
     onAfter: onAfter, current: function () { return current; }, NAV: NAV
   };

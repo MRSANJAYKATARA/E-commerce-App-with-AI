@@ -1,9 +1,19 @@
 <?php
 /**
  * Local development router for PHP's built-in server:
- *   php -S 127.0.0.1:8000 server.php
+ *   php -S 0.0.0.0:8000 server.php
  * In production, use Apache (.htaccess provided) or Nginx (see docs).
  */
+
+// Hardening headers for dev (parity with .htaccess in production).
+if (!headers_sent()) {
+    header('X-Content-Type-Options: nosniff');
+    header('X-Frame-Options: SAMEORIGIN');
+    header('Referrer-Policy: strict-origin-when-cross-origin');
+    header('Permissions-Policy: camera=(), microphone=(), geolocation=()');
+    header('X-Permitted-Cross-Domain-Policies: none');
+}
+
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $file = __DIR__ . $path;
 // Serve existing static assets directly.
