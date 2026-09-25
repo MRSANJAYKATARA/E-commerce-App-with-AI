@@ -110,7 +110,10 @@ Then sign in at `/admin`.
 - [ ] Settings configured (support email, social links). WhatsApp Support stays OFF unless intended.
 - [ ] Cashfree webhook reachable and signature verified (check `payments`/`payment_intents`).
 - [ ] SMTP sending works (test a purchase receipt).
-- [ ] HTTPS enforced; HSTS on.
+- [ ] HTTPS enforced; HSTS on — required for the **PWA service worker** registration.
+- [ ] PWA verified: manifest loads, install prompt appears, app opens offline from the cached
+      shell, and **no `/api/` response is present in DevTools → Cache Storage**.
+- [ ] After shipping frontend changes: bump `VERSION` in `sw.js` so clients refresh the shell.
 
 ## 8. Deployment process
 

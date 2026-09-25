@@ -19,6 +19,7 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
     var t0 = Date.now();
     EL.ui.theme.apply();
     buildShell();
+    registerPwa();
     EL.auth.onChange(function () { EL.ui.dispatch(); refreshUnread(); });
     try { EL.state.config = (await EL.api.get('/config')).config || {}; } catch (e) { EL.state.offline = true; }
     if (EL.state.offline) { showOfflineBanner(); }
@@ -44,6 +45,50 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
       s.classList.add('gone');
       setTimeout(function () { if (s.parentNode) s.parentNode.removeChild(s); }, 600);
     }, wait);
+  }
+
+  /* ================= PWA (install + offline shell) ================= */
+  var deferredInstall = null;
+  var isIOS = /iP(hone|ad|od)/.test(navigator.userAgent || '');
+
+  function canInstall() {
+    return !!deferredInstall || (isIOS && !window.navigator.standalone &&
+      /Safari/.test(navigator.userAgent || '') && !/Chrome|CriOS|FxiOS/.test(navigator.userAgent || ''));
+  }
+
+  function registerPwa() {
+    if (!('serviceWorker' in navigator)) return;
+    var host = location.hostname;
+    var secure = location.protocol === 'https:' || host === 'localhost' ||
+      host === '127.0.0.1' || host === '[::1]';
+    if (!secure) return;
+    navigator.serviceWorker.register('/sw.js').catch(function () {});
+  }
+
+  window.addEventListener('beforeinstallprompt', function (e) {
+    e.preventDefault();          // suppress the mini-infobar; we render our own button
+    deferredInstall = e;
+    if (EL.ui.current && EL.ui.current().name === 'account') EL.ui.dispatch();
+  });
+  window.addEventListener('appinstalled', function () {
+    deferredInstall = null;
+    EL.ui.toast('ExamLegacy installed to your home screen', 'ok');
+  });
+
+  async function promptInstall() {
+    if (deferredInstall) {
+      deferredInstall.prompt();
+      try { await deferredInstall.userChoice; } catch (e) {}
+      deferredInstall = null;
+      return;
+    }
+    EL.ui.sheet({
+      title: 'Install ExamLegacy',
+      sub: 'On iPhone / iPad — open in Safari',
+      body: '<div class="dim small">1. Tap the <b>Share</b> button in the Safari toolbar.<br>' +
+        '2. Choose <b>Add to Home Screen</b>.<br>3. Tap <b>Add</b> — ExamLegacy opens like a native app.</div>',
+      actions: [{ label: 'Got it', variant: 'ghost', onClick: function () {} }]
+    });
   }
 
   function buildShell() {
@@ -933,6 +978,7 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
       { icon: 'circle-question', label: 'Help & Support', go: 'support' },
       { icon: 'circle-info', label: 'About & Legal', act: 'about' }
     ];
+    if (canInstall()) menu.splice(4, 0, { icon: 'download', label: 'Install app', act: 'install' });
     EL.qs('#acct-menu', c).innerHTML = menu.map(function (m) {
       return '<div class="rowitem" ' + (m.go ? 'data-go="' + m.go + '"' : 'data-act="' + m.act + '"') + '>' +
         '<div class="lead">' + EL.ui.icon(m.icon) + '</div><div class="grow"><div class="t">' + m.label + '</div></div>' +
@@ -950,6 +996,7 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
         else if (a === 'profile') openProfileSheet();
         else if (a === 'privacy') openInfoSheet('Privacy & Security', 'Your data is private. Purchased PDFs are never exposed at public URLs and are watermarked to your account. Financial records are stored securely server-side. We only expose the minimum information needed to run your account.');
         else if (a === 'about') openAboutSheet();
+        else if (a === 'install') promptInstall();
         else if (a === 'signout') EL.auth.signOut().then(function () { EL.ui.toast('Signed out'); EL.ui.navigate('home'); });
       });
     });

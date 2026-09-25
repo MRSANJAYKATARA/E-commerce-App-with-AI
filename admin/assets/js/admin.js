@@ -66,6 +66,11 @@
   /* ---------- boot ---------- */
   function boot(){
     applyTheme();
+    // PWA: same service worker as the student app (offline shell for /admin too).
+    if ('serviceWorker' in navigator &&
+        (location.protocol === 'https:' || /localhost|127\.0\.0\.1/.test(location.hostname))) {
+      navigator.serviceWorker.register('/sw.js').catch(function () {});
+    }
     if(typeof firebase==='undefined'){showLogin('Firebase failed to load.');return;}
     firebase.initializeApp((window.EL&&window.EL.FIREBASE_CONFIG)||{});
     firebase.auth().onAuthStateChanged(async function(user){

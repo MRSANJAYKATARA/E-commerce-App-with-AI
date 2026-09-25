@@ -159,8 +159,12 @@ See **docs/DEPLOYMENT.md** for Apache/Nginx, webhooks, and the deployment/rollba
 - **Branding assets:** `assets/img/logo.svg` (full badge + wordmark) and `assets/img/mark.svg`
   (icon) — used by the splash, favicon, topbar, auth screen and admin. To use the official PNG
   artwork instead, drop it at `assets/img/logo.png` and update the references.
-- **No PWA by design:** there is intentionally **no** web app manifest, service worker or install
-  prompt — the product directive explicitly rules out a PWA install system.
+- **PWA (installable + offline shell):** `manifest.json` with generated icons (192/512,
+  maskable, apple-touch — reproducible via `tools/gen_pwa_icons.py`), a versioned service worker
+  (`sw.js`) that caches the **app shell only**, and an **Install app** row in Account
+  (native prompt on Chrome/Android, "Add to Home Screen" guidance on iOS). **`/api/*` is never
+  cached** — auth, payments, viewer streams and AI always go to the network. Registration needs
+  HTTPS or localhost.
 
 ---
 
