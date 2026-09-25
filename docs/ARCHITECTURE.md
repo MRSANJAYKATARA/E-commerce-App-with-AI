@@ -79,6 +79,10 @@ issueViewerSession ──> random token (returned once), stored as SHA-256 hash,
 - `upload` → requires an `ai_documents` row owned by the user, then reads the protected upload.
 - `text` → the user's own pasted input.
 
+Source-type vocabulary is resolved transparently before authorization (`library`, `product`,
+`purchased_pdf`, `pdf` → `purchased`; `uploads`, `document`, `file` → `upload`; `paste`, `free` →
+`text`), so clients sending either naming scheme hit the same authorization path instead of a 400.
+
 Content is sent to Gemini from the server (the API key never reaches the browser). Small files go
 inline; oversized PDFs fall back to best-effort text extraction. There is no path by which the
 model can read another user's files, unpublished PDFs, arbitrary URLs, or list the server directory.
@@ -105,6 +109,12 @@ native-style bottom sheets, bottom navigation (mobile) + side rail (desktop), sa
 selective liquid glass, and `prefers-reduced-motion` support. The admin dashboard is a separate
 app under `/admin` that requires an `admin`-role user.
 
+MathJax v3 (CDN, configured for `$…$` / `$$…$$`) typesets STEM equations after every Study AI,
+Support AI and Help AI answer. The home screen ships the 2026/27 Exam Accelerator promo banner
+with quick chips that deep-link into the store (`#/store?cat=…`). Profile pictures are uploaded
+from the Account screen (camera badge, ≤2 MB, image/* re-sniffed server-side) to
+`storage/public/avatars/` and streamed through `/api/cover` — raw storage URLs are never exposed.
+
 ## Design decisions & scope notes
 
 - **Firestore:** the brief lists MySQL + Firestore. MySQL is the authoritative store for all
@@ -114,3 +124,9 @@ app under `/admin` that requires an `admin`-role user.
 - **Screenshot protection:** not claimed. Layered deterrence is used instead (see README).
 - **PDF text extraction** (`PdfText`) is a best-effort fallback for oversized PDFs; the primary
   path sends the document inline to Gemini.
+- **Transactions:** `Db::transaction()` is re-entrant — nested calls join the existing transaction
+  instead of throwing "There is already an active transaction"; only the outermost frame commits
+  or rolls back.
+- **Profile media:** `users.avatar_url` either keeps the Google sign-in photo URL or stores a
+  relative path under `storage/public/avatars/`; `userShape()` resolves relative paths to
+  `/api/cover?f=…` so the storage layout stays private and swappable.

@@ -146,6 +146,12 @@ function route(string $path, string $method): void
         Http::ok(['user' => userShape($u)]);
         return;
     }
+    // Profile picture (DP) upload — multipart file OR JSON base64 data URL.
+    if ($path === '/me/avatar' && $method === 'POST') {
+        $u = Auth::authenticate();
+        Http::ok(['user' => handleAvatarUpload((int) $u['id'])]);
+        return;
+    }
 
     if ($path === '/library' && $method === 'GET') {
         $u = Auth::authenticate();
@@ -572,6 +578,108 @@ function optionalUserId(): ?int
     }
 }
 
+/**
+ * Resolve a stored media reference into a URL the client can load.
+ *  - Absolute http(s) / data: URLs (e.g. Google sign-in photo) pass through.
+ *  - Relative storage paths (e.g. "avatars/x.png") are streamed through the
+ *    public media endpoint so raw storage/ URLs are never exposed.
+ */
+function media_url(?string $url): ?string
+{
+    if ($url === null || $url === '') {
+        return null;
+    }
+    if (preg_match('#^(https?:)?//#i', $url) === 1 || strncmp($url, 'data:', 5) === 0) {
+        return $url;
+    }
+    return '/api/cover?f=' . rawurlencode(ltrim($url, '/'));
+}
+
+/**
+ * Profile picture upload (multipart `file` or JSON `avatar_base64` data URL).
+ * Files are stored under storage/public/avatars/ (never web-served directly)
+ * and served through /api/cover. Max 2 MB, image/* only, re-validated server-side.
+ */
+function handleAvatarUpload(int $userId): array
+{
+    $data = null;
+    $mime = '';
+
+    if (!empty($_FILES['file']) && is_array($_FILES['file']) && ($_FILES['file']['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK) {
+        $f = $_FILES['file'];
+        $size = (int) $f['size'];
+        if ($size <= 0 || $size > 2 * 1024 * 1024) {
+            throw new ApiError('upload_too_large', 'Profile picture must be under 2 MB', 413);
+        }
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $mime = (string) finfo_file($finfo, $f['tmp_name']);
+        finfo_close($finfo);
+        $data = file_get_contents($f['tmp_name']);
+    } else {
+        $b = Http::jsonBody();
+        $raw = (string) ($b['avatar_base64'] ?? '');
+        if ($raw === '') {
+            throw new ApiError('invalid_input', 'Provide a file (field "file") or "avatar_base64"', 400);
+        }
+        if (preg_match('#^data:(image/[a-z0-9.+-]+);base64,#i', $raw, $m)) {
+            $mime = strtolower($m[1]);
+            $raw = substr($raw, strpos($raw, ',') + 1);
+        } else {
+            $mime = 'image/png';
+        }
+        $data = base64_decode($raw, true);
+        if ($data === false) {
+            throw new ApiError('invalid_input', 'Invalid base64 image data', 400);
+        }
+        if (strlen($data) > 2 * 1024 * 1024) {
+            throw new ApiError('upload_too_large', 'Profile picture must be under 2 MB', 413);
+        }
+    }
+
+    if ($data === null || $data === '') {
+        throw new ApiError('upload_failed', 'Could not read the uploaded image', 400);
+    }
+    // Sniff the actual content — never trust the client-declared MIME.
+    $info = @getimagesizefromstring($data);
+    if ($info === false) {
+        throw new ApiError('unsupported_type', 'Only PNG, JPEG, WebP or GIF images are allowed', 415);
+    }
+    $allowed = [
+        IMAGETYPE_JPEG => 'jpg',
+        IMAGETYPE_PNG  => 'png',
+        IMAGETYPE_GIF  => 'gif',
+        IMAGETYPE_WEBP => 'webp',
+    ];
+    $type = (int) ($info[2] ?? 0);
+    if (!isset($allowed[$type])) {
+        throw new ApiError('unsupported_type', 'Only PNG, JPEG, WebP or GIF images are allowed', 415);
+    }
+
+    $dir = PUBLIC_MEDIA_DIR . '/avatars';
+    ensureDir($dir);
+    $name = random_hex(12) . '.' . $allowed[$type];
+    $dest = $dir . '/' . $name;
+    if (file_put_contents($dest, $data) === false) {
+        throw new ApiError('upload_failed', 'Could not save the profile picture', 500);
+    }
+    @chmod($dest, 0644);
+
+    $prev = Db::one('SELECT avatar_url FROM users WHERE id = ?', [$userId]);
+    Db::run('UPDATE users SET avatar_url = ? WHERE id = ?', ['avatars/' . $name, $userId]);
+
+    // Best-effort cleanup of a previously uploaded DP (never touch Google URLs).
+    $old = $prev['avatar_url'] ?? null;
+    if (is_string($old) && strncmp($old, 'avatars/', 8) === 0) {
+        $oldPath = PUBLIC_MEDIA_DIR . '/' . $old;
+        if (is_file($oldPath)) {
+            @unlink($oldPath);
+        }
+    }
+
+    $u = Db::one('SELECT * FROM users WHERE id = ?', [$userId]);
+    return userShape($u);
+}
+
 function userShape(array $u): array
 {
     return [
@@ -579,7 +687,7 @@ function userShape(array $u): array
         'name' => (string) $u['name'],
         'email' => (string) $u['email'],
         'phone' => $u['phone'] !== null ? (string) $u['phone'] : null,
-        'avatar_url' => $u['avatar_url'] !== null ? (string) $u['avatar_url'] : null,
+        'avatar_url' => media_url($u['avatar_url'] !== null ? (string) $u['avatar_url'] : null),
         'role' => (string) $u['role'],
         'status' => (string) $u['status'],
         'wallet_balance_paise' => (int) $u['wallet_balance_paise'],

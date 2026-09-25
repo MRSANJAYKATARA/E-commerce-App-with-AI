@@ -34,11 +34,14 @@ final class Gemini
             CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
             CURLOPT_POSTFIELDS     => json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
             CURLOPT_TIMEOUT        => 60,
+            // Force IPv4 — some hosts resolve the API to IPv6 first and time out.
+            CURLOPT_IPRESOLVE      => CURL_IPRESOLVE_V4,
         ]);
         $resp = curl_exec($ch);
         $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $err = curl_error($ch);
-        curl_close($ch);
+        // curl_close() is a no-op on PHP 8+: the handle is released
+        // automatically when $ch goes out of scope.
 
         if ($resp === false) {
             throw new ApiError('ai_error', 'AI service unreachable: ' . $err, 502);

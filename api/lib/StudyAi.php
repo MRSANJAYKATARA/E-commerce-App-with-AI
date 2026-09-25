@@ -120,7 +120,25 @@ final class StudyAi
      */
     private static function resolveSource(int $userId, array $source): array
     {
-        $type = $source['type'] ?? 'text';
+        $type = strtolower(trim((string) ($source['type'] ?? 'text')));
+        // Synonym resolution: clients (old and new) use different names for
+        // the same authorized source. Map them transparently — never 400 on
+        // a vocabulary mismatch when the underlying authorization is sound.
+        $type = [
+            'library'            => 'purchased',
+            'purchased'          => 'purchased',
+            'product'            => 'purchased',
+            'purchased_pdf'      => 'purchased',
+            'my_pdfs'            => 'purchased',
+            'pdf'                => 'purchased',
+            'upload'             => 'upload',
+            'uploads'            => 'upload',
+            'document'           => 'upload',
+            'file'               => 'upload',
+            'text'               => 'text',
+            'paste'              => 'text',
+            'free'               => 'text',
+        ][$type] ?? $type;
 
         if ($type === 'purchased') {
             $productId = (int) ($source['product_id'] ?? 0);

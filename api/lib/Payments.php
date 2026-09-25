@@ -37,6 +37,7 @@ final class Payments
                 'x-api-version: ' . CASHFREE_API_VERSION,
             ],
             CURLOPT_TIMEOUT        => 20,
+            CURLOPT_IPRESOLVE      => CURL_IPRESOLVE_V4,
         ]);
         if ($payload !== null) {
             curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
@@ -44,7 +45,6 @@ final class Payments
         $body = curl_exec($ch);
         $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $err = curl_error($ch);
-        curl_close($ch);
         if ($body === false) {
             throw new ApiError('gateway_error', 'Payment gateway unreachable: ' . $err, 502);
         }

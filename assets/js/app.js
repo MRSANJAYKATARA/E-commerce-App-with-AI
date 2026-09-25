@@ -5,6 +5,15 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
 (function () {
   var money = EL.money;
 
+  /** Re-typeset STEM equations inside `el` after AI answers are injected. */
+  function typeset(el) {
+    try {
+      if (window.MathJax && typeof MathJax.typesetPromise === 'function') {
+        MathJax.typesetPromise([el]).catch(function () {});
+      }
+    } catch (e) {}
+  }
+
   /* ================= boot ================= */
   async function boot() {
     EL.ui.theme.apply();
@@ -127,6 +136,19 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
           '<button class="btn lg" data-go="store">Browse the Store ' + EL.ui.icon('arrow-right') + '</button>' +
           (EL.auth.user() ? '' : '<button class="btn ghost lg" id="hero-signin">Sign in with Google</button>') +
         '</div>' +
+        '<div class="promo" id="promo">' +
+          '<div class="promo-top">' +
+            '<span class="promo-tag">' + EL.ui.icon('bolt') + ' 2026/27 Exam Accelerator</span>' +
+            '<span class="promo-badge">Sprint season</span>' +
+          '</div>' +
+          '<div class="promo-title">NEET · JEE · Boards · UPSC — your fast lane starts now.</div>' +
+          '<div class="promo-sub">Handpicked notes, PYQs and mock-test PDFs with instant, secure in-app access.</div>' +
+          '<div class="chips promo-chips">' +
+            ['NEET', 'JEE', 'Boards', 'UPSC'].map(function (cat) {
+              return '<button class="chip" data-quick="' + cat + '">' + cat + '</button>';
+            }).join('') +
+          '</div>' +
+        '</div>' +
       '</section>' +
       '<div class="featurerow mt-24">' +
         feature('shield-halved', 'Secure library', 'Your purchased PDFs are private, watermarked, and never exposed at a public link.') +
@@ -137,6 +159,9 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
       '<div id="featured">' + EL.ui.loading(4) + '</div>';
 
     EL.qsa('[data-go]', c).forEach(function (b) { b.addEventListener('click', function () { EL.ui.navigate(b.getAttribute('data-go')); }); });
+    EL.qsa('[data-quick]', c).forEach(function (b) {
+      b.addEventListener('click', function () { EL.ui.navigate('store', { cat: b.getAttribute('data-quick') }); });
+    });
     var si = EL.qs('#hero-signin', c); if (si) si.addEventListener('click', signIn);
 
     try {
@@ -188,7 +213,7 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
       '<div class="chips mt-16" id="cats"></div>' +
       '<div class="section"><h2>All material</h2></div>' +
       '<div id="results">' + EL.ui.loading(8) + '</div>';
-    var state = { q: '', cat: 'All' };
+    var state = { q: '', cat: (params && params.cat) || 'All' };
 
     async function load() {
       var host = EL.qs('#results', c);
@@ -210,8 +235,11 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
     try {
       EL.state.categories = (await EL.api.get('/categories')).categories || [];
     } catch (e) {}
+    // Deep-link (e.g. home quick chips): fall back to the full catalog when
+    // the requested category doesn't exist yet.
+    if (state.cat !== 'All' && EL.state.categories.indexOf(state.cat) === -1) state.cat = 'All';
     EL.qs('#cats', c).innerHTML = ['All'].concat(EL.state.categories).map(function (cat) {
-      return '<button class="chip ' + (cat === 'All' ? 'active' : '') + '" data-cat="' + EL.esc(cat) + '">' + EL.esc(cat) + '</button>';
+      return '<button class="chip ' + (cat === state.cat ? 'active' : '') + '" data-cat="' + EL.esc(cat) + '">' + EL.esc(cat) + '</button>';
     }).join('');
     EL.qsa('#cats [data-cat]', c).forEach(function (b) {
       b.addEventListener('click', function () {
@@ -483,6 +511,7 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
           '<span class="badge blue">' + EL.esc(r.task) + '</span><span class="tiny muted">-' + r.credits_spent + ' credits · ' + r.balance + ' left</span></div>' +
           '<div style="white-space:pre-wrap">' + EL.esc(r.answer) + '</div></div>';
         EL.qs('#credits-badge', c).textContent = r.balance + ' credits';
+        typeset(out);
       } catch (e) {
         out.innerHTML = EL.ui.errorBox(e.message);
       } finally { EL.qs('#ask', c).disabled = false; }
@@ -536,6 +565,7 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
       try {
         var r = await EL.api.post(path, body);
         out.innerHTML = '<div class="card" style="white-space:pre-wrap">' + EL.esc(r.answer) + '</div>';
+        typeset(out);
       } catch (e) { out.innerHTML = EL.ui.errorBox(e.message); }
     }
     async function renderHuman() {
@@ -603,8 +633,12 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
     var u = EL.auth.profile() || {};
     c.innerHTML =
       '<div class="card" style="display:flex;align-items:center;gap:14px">' +
-        (u.avatar_url ? '<img src="' + EL.esc(u.avatar_url) + '" style="width:56px;height:56px;border-radius:50%">' :
-          '<div class="lead" style="width:56px;height:56px;font-size:1.4rem">' + EL.ui.icon('user') + '</div>') +
+        '<div class="dp-wrap">' +
+          (u.avatar_url ? '<img class="dp" src="' + EL.esc(u.avatar_url) + '" alt="Profile photo">' :
+            '<div class="lead dp dp-placeholder">' + EL.ui.icon('user') + '</div>') +
+          '<button class="dp-badge" id="dp-btn" title="Change profile picture" aria-label="Change profile picture">' + EL.ui.icon('camera') + '</button>' +
+        '</div>' +
+        '<input type="file" id="dp-input" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none">' +
         '<div class="grow"><div class="b" style="font-size:1.1rem">' + EL.esc(u.name || '') + '</div>' +
         '<div class="tiny muted">' + EL.esc(u.email || '') + '</div>' +
         (u.vip_active ? '<span class="badge amber mt-8">VIP PASS</span>' : '') + '</div>' +
@@ -621,6 +655,21 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
       EL.qs('[data-open="wallet"]', c).addEventListener('click', openWalletSheet);
       EL.qs('[data-open="credits"]', c).addEventListener('click', openCreditsSheet);
     } catch (e) {}
+
+    // Profile picture (DP): one-click camera badge -> upload -> instant sync.
+    EL.qs('#dp-btn', c).addEventListener('click', function () { EL.qs('#dp-input', c).click(); });
+    EL.qs('#dp-input', c).addEventListener('change', async function (e) {
+      var f = e.target.files && e.target.files[0];
+      if (!f) return;
+      if (f.size > 2 * 1024 * 1024) { EL.ui.toast('Photo must be under 2 MB', 'err'); return; }
+      EL.ui.toast('Uploading photo…');
+      try {
+        await EL.api.upload('/me/avatar', f, 'file');
+        await EL.auth.refreshProfile();
+        EL.ui.toast('Profile photo updated');
+        EL.ui.navigate('account');
+      } catch (err) { EL.ui.toast(err.message, 'err'); }
+    });
 
     var menu = [
       { icon: 'book', label: 'My Library', go: 'library' },

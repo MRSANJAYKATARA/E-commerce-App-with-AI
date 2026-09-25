@@ -64,17 +64,26 @@ final class Db
         return (int) self::pdo()->lastInsertId();
     }
 
-    /** Execute a callback inside a transaction; rolls back on exception. */
+    /** Execute a callback inside a transaction; rolls back on exception.
+     *  Nested calls join the existing transaction instead of crashing with
+     *  "There is already an active transaction". */
     public static function transaction(callable $fn)
     {
         $pdo = self::pdo();
-        $pdo->beginTransaction();
+        $nested = $pdo->inTransaction();
+        if (!$nested) {
+            $pdo->beginTransaction();
+        }
         try {
             $result = $fn($pdo);
-            $pdo->commit();
+            if (!$nested) {
+                $pdo->commit();
+            }
             return $result;
         } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) {
+            // Only the outermost frame rolls back; inner frames re-throw and
+            // let the owner of the real transaction decide.
+            if (!$nested && $pdo->inTransaction()) {
                 $pdo->rollBack();
             }
             throw $e;

@@ -87,7 +87,9 @@ docs/                      DEPLOYMENT.md, ARCHITECTURE.md
 
 ```bash
 # 1. PHP 8.1+ with extensions: pdo_mysql, mbstring, curl, fileinfo, openssl, json
-# 2. MySQL: create a database and import the schema + seed
+#    (mbstring is polyfilled in api/config.php if the extension is missing)
+# 2. MariaDB/MySQL: start the server, create the database, import schema + seed
+service mariadb start   # Debian/Ubuntu; use mysqld/mysqld_safe elsewhere
 mysql -u root -p -e "CREATE DATABASE examlegacy CHARACTER SET utf8mb4;"
 mysql -u root -p examlegacy < migrations/schema.sql
 mysql -u root -p examlegacy < migrations/seed.sql
@@ -102,10 +104,10 @@ composer install
 #    and your Firebase *project id* in .env (FIREBASE_PROJECT_ID)
 
 # 6. Run
-php -S 127.0.0.1:8000 server.php
+php -S 0.0.0.0:8000 server.php
 ```
 
-Open `http://127.0.0.1:8000` (student app) and `http://127.0.0.1:8000/admin`.
+Open `http://localhost:8000/` (student app) and `http://localhost:8000/admin/`.
 To make a user an admin: `UPDATE users SET role='admin' WHERE email='you@example.com';`
 after their first Google sign-in.
 

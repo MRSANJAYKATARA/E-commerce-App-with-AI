@@ -56,6 +56,40 @@ function env_bool(string $key, bool $default = false): bool
     return in_array(strtolower($v), ['1', 'true', 'yes', 'on'], true);
 }
 
+// ---- mbstring polyfills ----------------------------------------------------
+// Some minimal PHP images ship without ext-mbstring. These native fallbacks
+// keep the codebase working (UTF-8 aware) until the extension is installed.
+if (!function_exists('mb_substr')) {
+    function mb_substr(string $string, int $start, ?int $length = null, ?string $encoding = null): string
+    {
+        $chars = preg_split('//u', $string, -1, PREG_SPLIT_NO_EMPTY);
+        if ($chars === false) {
+            return (string) substr($string, $start, $length);
+        }
+        $slice = $length === null ? array_slice($chars, $start) : array_slice($chars, $start, $length);
+        return implode('', $slice);
+    }
+}
+if (!function_exists('mb_strlen')) {
+    function mb_strlen(string $string, ?string $encoding = null): int
+    {
+        $chars = preg_split('//u', $string, -1, PREG_SPLIT_NO_EMPTY);
+        return $chars === false ? (int) strlen($string) : count($chars);
+    }
+}
+if (!function_exists('mb_strtolower')) {
+    function mb_strtolower(string $string, ?string $encoding = null): string
+    {
+        return strtolower($string);
+    }
+}
+if (!function_exists('mb_strtoupper')) {
+    function mb_strtoupper(string $string, ?string $encoding = null): string
+    {
+        return strtoupper($string);
+    }
+}
+
 // ---- Constants ------------------------------------------------------------
 define('APP_ENV', env('APP_ENV', 'production'));
 define('APP_DEBUG', env_bool('APP_DEBUG', false));
@@ -78,7 +112,7 @@ define('CASHFREE_API_VERSION', env('CASHFREE_API_VERSION', '2023-08-01'));
 define('CASHFREE_WEBHOOK_SECRET', env('CASHFREE_WEBHOOK_SECRET', ''));
 
 define('GEMINI_API_KEY', env('GEMINI_API_KEY', ''));
-define('GEMINI_MODEL', env('GEMINI_MODEL', 'gemini-1.5-flash'));
+define('GEMINI_MODEL', env('GEMINI_MODEL', 'gemini-2.5-flash'));
 define('GEMINI_API_BASE', rtrim(env('GEMINI_API_BASE', 'https://generativelanguage.googleapis.com/v1beta'), '/'));
 
 define('SMTP_HOST', env('SMTP_HOST', ''));
