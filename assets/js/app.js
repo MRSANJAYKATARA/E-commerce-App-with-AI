@@ -18,6 +18,7 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
   async function boot() {
     var t0 = Date.now();
     EL.ui.theme.apply();
+    applyGlass(); /* restore glass intensity (iOS 27-style slider) */
     buildShell();
     registerPwa();
     EL.auth.onChange(function () { EL.ui.dispatch(); refreshUnread(); });
@@ -1081,12 +1082,32 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
     });
   }
 
+  /* ---- Glass intensity — web equivalent of the iOS 27 transparency slider ---- */
+  function applyGlass(level) {
+    try {
+      if (level === undefined || level === null) level = localStorage.getItem('el_glass') || '';
+      if (level === 'clear' || level === 'tinted') {
+        document.documentElement.setAttribute('data-glass', level);
+        try { localStorage.setItem('el_glass', level); } catch (e) {}
+      } else {
+        document.documentElement.removeAttribute('data-glass');
+        try { localStorage.removeItem('el_glass'); } catch (e) {}
+      }
+    } catch (e) {}
+  }
+
   function openAppearanceSheet() {
+    var cur = document.documentElement.getAttribute('data-glass') || 'balanced';
     var s = EL.ui.sheet({
-      title: 'Appearance', sub: 'Choose light, dark, or match your device.',
+      title: 'Appearance', sub: 'Theme, then glass intensity — like the iOS 27 transparency slider.',
       body: '<div class="segmented" id="theme-pick" style="width:100%">' +
         ['light', 'dark', 'system'].map(function (t) {
           return '<button data-t="' + t + '" class="' + (EL.ui.theme.get() === t ? 'active' : '') + '" style="flex:1">' + t + '</button>';
+        }).join('') + '</div>' +
+        '<div class="field" style="margin:18px 0 6px"><label>Glass intensity</label></div>' +
+        '<div class="segmented" id="glass-pick" style="width:100%">' +
+        [['clear', 'Clear'], ['balanced', 'Balanced'], ['tinted', 'Tinted']].map(function (g) {
+          return '<button data-g="' + g[0] + '" class="' + (cur === g[0] ? 'active' : '') + '" style="flex:1">' + g[1] + '</button>';
         }).join('') + '</div>',
       actions: [{ label: 'Done', onClick: function () {} }]
     });
@@ -1094,6 +1115,13 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
       b.addEventListener('click', function () {
         EL.qsa('#theme-pick button', s.el).forEach(function (x) { x.classList.remove('active'); });
         b.classList.add('active'); EL.ui.theme.set(b.getAttribute('data-t'));
+      });
+    });
+    EL.qsa('#glass-pick button', s.el).forEach(function (b) {
+      b.addEventListener('click', function () {
+        EL.qsa('#glass-pick button', s.el).forEach(function (x) { x.classList.remove('active'); });
+        b.classList.add('active'); applyGlass(b.getAttribute('data-g'));
+        EL.ui.toast('Glass: ' + b.textContent);
       });
     });
   }
