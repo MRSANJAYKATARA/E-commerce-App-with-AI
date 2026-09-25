@@ -57,7 +57,7 @@ A single `payment_intents` table drives every paid action (`order`, `recharge`, 
 ```
 paid order ──> pdf_access (active)            [ownership]
                      |
-issueViewerSession ──> random token (returned once), stored as SHA-256 hash, TTL ~15 min
+issueViewerSession ──> random token (returned once), stored as SHA-256 hash, TTL 2 h (VIEWER_SESSION_TTL)
                      |
 /viewer/stream (X-Viewer-Token) ──> resolveViewerSession:
         token hash exists? not revoked? not expired?

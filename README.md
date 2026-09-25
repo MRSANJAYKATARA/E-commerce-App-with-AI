@@ -150,9 +150,12 @@ See **docs/DEPLOYMENT.md** for Apache/Nginx, webhooks, and the deployment/rollba
   audited.
 - **Navigation:** Home · Store · Study AI · **Legacy Vault** (unique name for everything you
   purchased) · Account. Help & Support (Support AI, Help AI, human tickets) is inside **Account**.
-- **Motion & polish:** boot splash with the ExamLegacy logo, staggered page entrances, chat bubble
-  animations, aurora ambience, frosted topbar — all GPU-cheap and disabled under
-  `prefers-reduced-motion`. Works on mobile, desktop and all modern browsers.
+- **Motion & polish:** boot splash with the ExamLegacy logo, 240ms `screen-enter` view
+  transitions on every route, spring bottom sheets with blurred scrim
+  (`cubic-bezier(0.16,1,0.3,1)`), staggered entrances, chat wave-typing indicators, VIP pulse
+  glow, aurora ambience, frosted topbar, tactile press feedback, and a celebratory success modal
+  after purchases — all GPU-cheap and disabled under `prefers-reduced-motion`. Works on mobile,
+  desktop and all modern browsers.
 - **Branding assets:** `assets/img/logo.svg` (full badge + wordmark) and `assets/img/mark.svg`
   (icon) — used by the splash, favicon, topbar, auth screen and admin. To use the official PNG
   artwork instead, drop it at `assets/img/logo.png` and update the references.

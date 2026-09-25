@@ -281,8 +281,18 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
     c.innerHTML = '<div class="grid cols-2">' + EL.ui.loading(2) + '</div>';
     var p;
     try { p = (await EL.api.get('/products/' + encodeURIComponent(params.slug))).product; }
-    catch (e) { c.innerHTML = EL.ui.errorBox(e.message); return; }
-    if (!p) { c.innerHTML = EL.ui.empty({ icon: 'box-open', title: 'Not found' }); return; }
+    catch (e) {
+      c.innerHTML = EL.ui.errorBox(e.message) +
+        '<button class="btn soft block mt-16" data-back>Back to Store</button>';
+      var be = EL.qs('[data-back]', c); if (be) be.addEventListener('click', function () { EL.ui.navigate('store'); });
+      return;
+    }
+    if (!p) {
+      c.innerHTML = EL.ui.empty({ icon: 'box-open', title: 'Product not found', text: 'It may have been unpublished.',
+        actionLabel: 'Back to Store', action: 'store' });
+      var bf = EL.qs('[data-act]', c); if (bf) bf.addEventListener('click', function () { EL.ui.navigate('store'); });
+      return;
+    }
 
     c.innerHTML =
       '<div class="grid" style="grid-template-columns:1fr;gap:20px">' +
@@ -291,12 +301,15 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
             '<div class="empty"><div class="ic">' + EL.ui.icon('book') + '</div></div>') +
         '</div>' +
         '<div>' +
-          (p.is_vip ? '<span class="badge amber">VIP</span> ' : '') +
+          (p.is_vip ? '<span class="badge amber pulse-glow">VIP</span> ' : '') +
           '<span class="badge slate">' + EL.esc(p.category) + '</span>' +
           '<h1 style="font-size:1.5rem;font-weight:800;letter-spacing:-0.02em;margin:10px 0 4px">' + EL.esc(p.title) + '</h1>' +
           (p.subtitle ? '<p class="dim">' + EL.esc(p.subtitle) + '</p>' : '') +
-          '<div class="flex center gap-8 mt-8"><span class="price" style="font-size:1.5rem">' + money(p.price_paise, p.currency) + '</span>' +
-            (p.mrp_paise > p.price_paise ? '<s class="muted">' + money(p.mrp_paise, p.currency) + '</s>' : '') + '</div>' +
+          '<div class="flex center gap-8 mt-8 flex-wrap" style="flex-wrap:wrap"><span class="price" style="font-size:1.5rem">' + money(p.price_paise, p.currency) + '</span>' +
+            (p.mrp_paise > p.price_paise
+              ? '<s class="muted">' + money(p.mrp_paise, p.currency) + '</s>' +
+                '<span class="badge green">−' + Math.round((1 - p.price_paise / p.mrp_paise) * 100) + '% today</span>'
+              : '') + '</div>' +
           '<div class="tiny muted mt-8">' + p.page_count + ' pages · ' + EL.bytes(p.file_size_bytes) + ' · ' + EL.esc(p.language) + '</div>' +
           '<div id="buy" class="mt-16"></div>' +
           '<div class="divider"></div>' +
@@ -366,7 +379,12 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
         if (method === 'split') payload.wallet_paise = parseInt(EL.qs('#split-amt', sheet.el).value || '0', 10);
         var res = await EL.api.post('/orders', payload);
         if (res.order.status === 'paid') {
-          sheet.close(); EL.ui.toast('Purchase complete! Added to your library.', 'ok');
+          sheet.close();
+          await EL.ui.celebration({
+            title: 'Purchase complete!',
+            message: 'Unlocked in your Legacy Vault — happy studying!',
+            buttonLabel: 'Open my Vault'
+          });
           EL.ui.navigate('vault');
         } else if (res.payment && res.payment.payment_session_id) {
           sheet.close();
@@ -406,10 +424,18 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
           var r = await EL.api.post('/payments/verify', { intent_id: payment.intent_id });
           if (r.status === 'paid') {
             clearInterval(timer);
-            EL.ui.toast('Payment verified!', 'ok');
             await EL.auth.refreshProfile();
-            if (kind === 'order') EL.ui.navigate('vault');
-            else EL.ui.navigate('account');
+            if (kind === 'order') {
+              await EL.ui.celebration({
+                title: 'Payment verified!',
+                message: 'Your material is unlocked in the Legacy Vault.',
+                buttonLabel: 'Open my Vault'
+              });
+              EL.ui.navigate('vault');
+            } else {
+              EL.ui.toast('Payment verified!', 'ok');
+              EL.ui.navigate('account');
+            }
           } else if (r.status === 'failed' || tries > 60) {
             clearInterval(timer); EL.ui.toast('Payment not completed.', 'err');
           }
@@ -508,12 +534,12 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
             return '<div class="msg ai" ' + d + '><img class="avatar" src="/assets/img/mark.svg" alt="">' +
               '<div class="bubble err">' + EL.ui.icon('triangle-exclamation') + ' ' + EL.esc(m.text) + '</div></div>';
           }
+          var meta = m.meta ? '<span class="msg-meta">' + EL.esc(m.meta) + '</span>' : '';
           return '<div class="msg ai" ' + d + '><img class="avatar" src="/assets/img/mark.svg" alt="">' +
-            '<div class="bubble">' + EL.ui.md(m.text) + '</div></div>';
+            '<div class="bubble">' + EL.ui.md(m.text) + meta + '</div></div>';
         }).join('');
         if (showTyping) {
-          html += '<div class="msg ai" id="typing"><img class="avatar" src="/assets/img/mark.svg" alt="">' +
-            '<div class="bubble typing" aria-label="Study AI is typing"><i></i><i></i><i></i></div></div>';
+          html += EL.ui.aiTyping('Study AI is analyzing…');
         }
       }
       chatEl.innerHTML = html;
@@ -633,7 +659,10 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
       // No source_type => all-in-one general chat (backend default).
       try {
         var r = await EL.api.post('/ai/study', payload);
-        msgs.push({ role: 'ai', text: r.answer });
+        msgs.push({
+          role: 'ai', text: r.answer,
+          meta: r.task + ' · −' + r.credits_spent + ' credits · ' + r.balance + ' left'
+        });
         EL.qs('#credits-badge', c).textContent = r.balance + ' credits';
       } catch (e) {
         msgs.push({ role: 'ai', text: e.message, err: true });
@@ -668,10 +697,30 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
         '<button data-tab="help" style="flex:1">Help AI</button>' +
         '<button data-tab="human" style="flex:1">Tickets</button>' +
       '</div>' +
-      '<div id="sup-panel"></div>';
+      '<div id="sup-panel"></div>' +
+      '<div class="section"><h2>Official channels</h2></div>' +
+      '<div class="card pad-0" id="sup-social"></div>';
     var tab = 'support';
     var panel = EL.qs('#sup-panel', c);
     var chats = { support: [], help: [] };
+
+    // Blueprint Step 7 — verified community links (admin-configured only).
+    var cfgS = EL.state.config || {};
+    var socials = [
+      ['telegram', 'Telegram channel', cfgS.telegram_channel],
+      ['telegram', 'Telegram discussion group', cfgS.telegram],
+      ['instagram', 'Instagram', cfgS.instagram],
+      ['youtube', 'YouTube', cfgS.youtube],
+      ['whatsapp', 'WhatsApp channel', cfgS.whatsapp_channel]
+    ].filter(function (l) { return !!l[2]; });
+    EL.qs('#sup-social', c).innerHTML = socials.length
+      ? socials.map(function (l) {
+          return '<a class="rowitem" href="' + EL.esc(l[2]) + '" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">' +
+            '<div class="lead">' + EL.ui.icon('brands', 'fab fa-' + l[0]) + '</div>' +
+            '<div class="grow"><div class="t">' + l[1] + '</div></div>' +
+            '<div class="chev">' + EL.ui.icon('arrow-up-right-from-square') + '</div></a>';
+        }).join('')
+      : '<div style="padding:14px" class="tiny muted">Official links are configured by the admin.</div>';
     EL.qsa('#sup-tabs button', c).forEach(function (b) {
       b.addEventListener('click', function () {
         EL.qsa('#sup-tabs button', c).forEach(function (x) { x.classList.remove('active'); });
@@ -731,8 +780,7 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
               '<div class="bubble">' + EL.ui.md(m.text) + '</div></div>';
           }).join('');
           if (typing) {
-            html += '<div class="msg ai"><img class="avatar" src="/assets/img/mark.svg" alt="">' +
-              '<div class="bubble typing"><i></i><i></i><i></i></div></div>';
+            html += EL.ui.aiTyping(isSupport ? 'Support AI is checking your account…' : 'Help AI is thinking…');
           }
         }
         chatEl.innerHTML = html;
@@ -845,7 +893,7 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
         '<input type="file" id="dp-input" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none">' +
         '<div class="grow"><div class="b" style="font-size:1.1rem">' + EL.esc(u.name || '') + '</div>' +
         '<div class="tiny muted">' + EL.esc(u.email || '') + '</div>' +
-        (u.vip_active ? '<span class="badge amber mt-8">VIP PASS</span>' : '') + '</div>' +
+        (u.vip_active ? '<span class="badge amber mt-8 pulse-glow">VIP PASS</span>' : '') + '</div>' +
       '</div>' +
       '<div class="grid cols-2 mt-16" id="balances"></div>' +
       '<div class="section"><h2>Account</h2></div>' +

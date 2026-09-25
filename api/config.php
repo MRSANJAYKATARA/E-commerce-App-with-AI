@@ -129,7 +129,7 @@ define('UPLOADS_DIR', STORAGE_PATH . '/' . trim(env('UPLOADS_DIR', 'uploads'), '
 define('PUBLIC_MEDIA_DIR', STORAGE_PATH . '/' . trim(env('PUBLIC_MEDIA_DIR', 'public'), '/'));
 
 define('VIEWER_TOKEN_SECRET', env('VIEWER_TOKEN_SECRET', 'dev-insecure-change-me'));
-define('VIEWER_SESSION_TTL', (int) env('VIEWER_SESSION_TTL', '900'));
+define('VIEWER_SESSION_TTL', (int) env('VIEWER_SESSION_TTL', '7200'));
 
 // Composer autoloader (PHPMailer, Firestore SDK) if dependencies are installed.
 $vendorAutoload = dirname(__DIR__) . '/vendor/autoload.php';

@@ -45,6 +45,6 @@ ON DUPLICATE KEY UPDATE name = VALUES(name), price_paise = VALUES(price_paise), 
 -- AI credit packs (separate from Store Wallet).
 INSERT INTO credit_packs (code, name, credits, bonus_credits, price_paise, currency, is_active) VALUES
   ('credits_starter', 'Starter Pack', 100, 0, 4900, 'INR', 1),
-  ('credits_plus',    'Plus Pack',    300, 30, 12900, 'INR', 1),
-  ('credits_pro',     'Pro Pack',     1000, 150, 39900, 'INR', 1)
+  ('credits_scholar', 'Scholar Pack', 350, 0, 14900, 'INR', 1),
+  ('credits_master',  'Master Pack',  1000, 150, 39900, 'INR', 1)
 ON DUPLICATE KEY UPDATE name = VALUES(name), credits = VALUES(credits), bonus_credits = VALUES(bonus_credits), price_paise = VALUES(price_paise), is_active = VALUES(is_active);

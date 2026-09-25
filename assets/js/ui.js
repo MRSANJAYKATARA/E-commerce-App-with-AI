@@ -176,6 +176,8 @@ EL.ui = (function () {
     if (content) content.innerHTML = '';
     afterHooks = [];
     try { def_.handler(content, r.params); } catch (e) { console.error(e); if (content) content.innerHTML = errorBox(e.message || 'Failed to load'); }
+    // Blueprint rule #2: every dispatch plays the .screen-enter view transition.
+    playScreenEnter(content);
     // Staggered entrance for the route's top-level blocks (skipped under
     // prefers-reduced-motion via CSS).
     if (content) {
@@ -188,6 +190,14 @@ EL.ui = (function () {
   }
   function onAfter(cb) { afterHooks.push(cb); }
   function start() { window.addEventListener('hashchange', dispatch); dispatch(); }
+
+  /* Blueprint §4.1 — the 240ms view transition on every route change. */
+  function playScreenEnter(el) {
+    if (!el) return;
+    el.classList.remove('screen-enter');
+    void el.offsetWidth; // force reflow so the animation restarts
+    el.classList.add('screen-enter');
+  }
 
   /* ---------------- Navigation chrome ---------------- */
   var NAV = [
@@ -219,11 +229,46 @@ EL.ui = (function () {
     }
   }
 
+  /* ---------------- AI typing indicator (blueprint rule #4) ---------------- */
+  function aiTyping(label) {
+    return '<div class="msg ai"><img class="avatar" src="/assets/img/mark.svg" alt="">' +
+      '<div class="bubble typing" role="status" aria-label="' + EL.esc(label || 'Thinking') + '">' +
+      '<i></i><i></i><i></i><span>' + EL.esc(label || 'Thinking…') + '</span></div></div>';
+  }
+
+  /* ---------------- Celebration modal (blueprint §4.6) ---------------- */
+  function celebration(opts) {
+    opts = opts || {};
+    return new Promise(function (resolve) {
+      var ov = document.createElement('div');
+      ov.className = 'celebration-overlay';
+      ov.innerHTML =
+        '<div class="celebration-card" role="dialog" aria-live="polite">' +
+          '<div class="celebration-check"><i class="fas fa-check"></i></div>' +
+          '<h3>' + EL.esc(opts.title || 'Payment successful!') + '</h3>' +
+          '<p>' + EL.esc(opts.message || 'Your purchase is confirmed and unlocked.') + '</p>' +
+          '<button class="btn block" data-done>' + EL.esc(opts.buttonLabel || 'Continue') + '</button>' +
+        '</div>';
+      function done() {
+        ov.style.opacity = '0';
+        ov.style.transition = 'opacity .2s ease';
+        setTimeout(function () { if (ov.parentNode) ov.parentNode.removeChild(ov); }, 220);
+        resolve(true);
+      }
+      ov.addEventListener('click', function (e) { if (e.target === ov) done(); });
+      var btn = ov.querySelector('[data-done]');
+      if (btn) btn.addEventListener('click', done);
+      document.body.appendChild(ov);
+      if (btn) btn.focus();
+    });
+  }
+
   applyTheme();
   return {
     theme: { get: getTheme, set: setTheme, apply: applyTheme },
     toast: toast, sheet: sheet, confirm: confirm, icon: icon,
     loading: loading, empty: empty, errorBox: errorBox, md: md,
+    aiTyping: aiTyping, celebration: celebration,
     def: def, navigate: navigate, dispatch: dispatch, start: start,
     onAfter: onAfter, current: function () { return current; }, NAV: NAV
   };
