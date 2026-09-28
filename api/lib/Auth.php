@@ -192,6 +192,19 @@ final class Auth
             self::grantTrialCredits($userId);
             $user = Db::one('SELECT * FROM users WHERE id = ?', [$userId]);
         }
+
+        // Real-time secondary mirror (spec §2.2) — non-fatal, MySQL stays master.
+        Firestore::doc('users', (string) $userId, [
+            'email'               => (string) $user['email'],
+            'name'                => (string) $user['name'],
+            'role'                => (string) $user['role'],
+            'status'              => (string) $user['status'],
+            'wallet_balance_paise'=> (int) $user['wallet_balance_paise'],
+            'ai_credit_balance'   => (int) $user['ai_credit_balance'],
+            'vip_active'          => (bool) (int) $user['vip_active'],
+            'vip_expires_at'      => $user['vip_expires_at'] !== null ? (string) $user['vip_expires_at'] : null,
+            'mirrored_at'         => gmdate('c'),
+        ]);
         return $user;
     }
 
@@ -220,13 +233,108 @@ final class Auth
         });
     }
 
-    /** Require an authenticated admin; returns the admin user row. */
+    /** Require an authenticated admin; returns the admin user row.
+     *  Accepts EITHER a dedicated eladm_ session token (email+password login,
+     *  zero Google dependency — spec §4.2) OR a legacy Firebase admin session. */
     public static function authenticateAdmin(): array
     {
+        $token = Http::bearerToken();
+        if ($token !== null && strpos($token, 'eladm_') === 0) {
+            $payload = self::verifyAdminToken($token);
+            return self::adminIdentity((string) ($payload['sub'] ?? ''));
+        }
         $user = self::authenticate();
         if (($user['role'] ?? 'user') !== 'admin') {
             throw new ApiError('forbidden', 'Administrator access required', 403);
         }
         return $user;
+    }
+
+    // ========================================================================
+    //  Dedicated superadmin sessions — eladm_<b64url(payload)>|<b64url(hmac)>
+    //  Credentials come from .env (ADMIN_EMAIL / ADMIN_PASSWORD). Never Google.
+    // ========================================================================
+
+    public static function adminLogin(string $email, string $password): array
+    {
+        if (ADMIN_EMAIL === '' || ADMIN_PASSWORD === '') {
+            throw new ApiError('admin_not_configured', 'Admin sign-in is not configured yet.', 503);
+        }
+        RateLimit::hit('admin_login', 10, 60);
+        $ok = hash_equals(ADMIN_EMAIL, strtolower(trim($email)))
+            && hash_equals(ADMIN_PASSWORD, $password);
+        if (!$ok) {
+            throw new ApiError('invalid_credentials', 'Email or password is incorrect.', 401);
+        }
+        $token = self::issueAdminToken(ADMIN_EMAIL);
+        return [
+            'token'      => $token,
+            'expires_in' => ADMIN_TOKEN_TTL,
+            'admin'      => self::adminIdentity(ADMIN_EMAIL),
+        ];
+    }
+
+    private static function issueAdminToken(string $email): string
+    {
+        $payload = [
+            'sub'   => $email,
+            'iat'   => time(),
+            'exp'   => time() + ADMIN_TOKEN_TTL,
+            'rnd'   => bin2hex(random_bytes(8)),
+        ];
+        $b64 = self::b64urlEncode(json_encode($payload, JSON_UNESCAPED_SLASHES));
+        $sig = hash_hmac('sha256', $b64, ADMIN_TOKEN_SECRET, true);
+        return 'eladm_' . $b64 . '|' . self::b64urlEncode($sig);
+    }
+
+    /** Verify an eladm_ token; throws on invalid/expired. Returns the payload. */
+    public static function verifyAdminToken(string $token): array
+    {
+        if (strpos($token, 'eladm_') !== 0) {
+            throw new ApiError('unauthenticated', 'Invalid admin session', 401);
+        }
+        $body = substr($token, 6);
+        $parts = explode('|', $body);
+        if (count($parts) !== 2 || $parts[0] === '' || $parts[1] === '') {
+            throw new ApiError('unauthenticated', 'Invalid admin session', 401);
+        }
+        [$b64, $sigB64] = $parts;
+        $expect = self::b64urlEncode(hash_hmac('sha256', $b64, ADMIN_TOKEN_SECRET, true));
+        if (!hash_equals($expect, $sigB64)) {
+            throw new ApiError('unauthenticated', 'Invalid admin session', 401);
+        }
+        $payload = json_decode((string) self::b64urlDecode($b64), true);
+        if (!is_array($payload) || (int) ($payload['exp'] ?? 0) < time()) {
+            throw new ApiError('session_expired', 'Your admin session expired. Sign in again.', 401);
+        }
+        if (($payload['sub'] ?? '') !== ADMIN_EMAIL) {
+            throw new ApiError('unauthenticated', 'Invalid admin session', 401);
+        }
+        return $payload;
+    }
+
+    /** Identity row for the dedicated admin: DB row when the account exists
+     *  (role forced to admin), otherwise a stable synthetic admin record. */
+    public static function adminIdentity(string $email): array
+    {
+        $row = null;
+        try {
+            $row = Db::one('SELECT * FROM users WHERE email = ?', [$email]);
+        } catch (\Throwable $e) {
+            $row = null;
+        }
+        if (is_array($row)) {
+            $row['role'] = 'admin';
+            return $row;
+        }
+        return [
+            'id' => 0, 'email' => $email, 'name' => 'Superadmin',
+            'role' => 'admin', 'status' => 'active',
+        ];
+    }
+
+    private static function b64urlEncode(string $raw): string
+    {
+        return rtrim(strtr(base64_encode($raw), '+/', '-_'), '=');
     }
 }

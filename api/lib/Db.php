@@ -18,20 +18,33 @@ final class Db
         if (self::$pdo instanceof PDO) {
             return self::$pdo;
         }
-        $dsn = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=%s', DB_HOST, DB_PORT, DB_NAME, DB_CHARSET);
+        // Spec §3: smart local failover — if the configured remote host is
+        // unreachable, automatically retry against 127.0.0.1 before failing.
         $options = [
             PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_EMULATE_PREPARES   => false,
             PDO::ATTR_STRINGIFY_FETCHES  => false,
         ];
-        try {
-            self::$pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
-        } catch (PDOException $e) {
-            error_log('[ExamLegacy] DB connection failed: ' . $e->getMessage());
-            throw new \RuntimeException('Database unavailable', 0, $e);
+        $hosts = [DB_HOST];
+        if (DB_HOST !== '127.0.0.1' && DB_HOST !== 'localhost') {
+            $hosts[] = '127.0.0.1';
         }
-        return self::$pdo;
+        $last = null;
+        foreach ($hosts as $host) {
+            $dsn = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=%s', $host, DB_PORT, DB_NAME, DB_CHARSET);
+            try {
+                self::$pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
+                if ($host !== DB_HOST) {
+                    error_log('[ExamLegacy] DB failover: remote host unreachable, connected via 127.0.0.1');
+                }
+                return self::$pdo;
+            } catch (PDOException $e) {
+                $last = $e;
+                error_log('[ExamLegacy] DB connection failed (' . $host . '): ' . $e->getMessage());
+            }
+        }
+        throw new \RuntimeException('Database unavailable', 0, $last);
     }
 
     public static function run(string $sql, array $params = []): \PDOStatement

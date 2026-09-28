@@ -5,7 +5,7 @@
 SET NAMES utf8mb4;
 
 -- Admin-controlled external support links (edit in Admin Panel > Settings).
-INSERT INTO settings (`key`, value) VALUES
+INSERT INTO site_settings (`key`, value) VALUES
   ('support_email', 'sanjayxlegacysupport@gmail.com'),
   ('telegram', 'https://t.me/sanjayx_legacy01'),
   ('telegram_channel', 'https://t.me/examlegacy'),

@@ -11,7 +11,7 @@
  */
 'use strict';
 
-const VERSION = 'examlegacy-v1';
+const VERSION = 'examlegacy-v2';
 const SHELL_CACHE = VERSION + '-shell';
 const CDN_CACHE = VERSION + '-cdn';
 

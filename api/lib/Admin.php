@@ -16,7 +16,7 @@ final class Admin
     public static function audit(int $actorId, string $action, string $entity, $entityId, $before = null, $after = null): void
     {
         Db::run(
-            'INSERT INTO audit_logs (actor_user_id, actor_role, action, entity, entity_id, before_json, after_json, ip)
+            'INSERT INTO admin_audit_logs (actor_user_id, actor_role, action, entity, entity_id, before_json, after_json, ip)
              VALUES (?,?,?,?,?,?,?,?)',
             [
                 $actorId, 'admin', $action, $entity,
@@ -172,7 +172,7 @@ final class Admin
     {
         return Db::all(
             'SELECT a.id, a.action, a.entity, a.entity_id, a.before_json, a.after_json, a.created_at, u.name AS actor_name, u.email AS actor_email
-             FROM audit_logs a LEFT JOIN users u ON u.id = a.actor_user_id
+             FROM admin_audit_logs a LEFT JOIN users u ON u.id = a.actor_user_id
              ORDER BY a.id DESC LIMIT ' . max(1, min(300, $limit)) . ' OFFSET ' . max(0, $offset)
         );
     }
@@ -180,7 +180,7 @@ final class Admin
     public static function allSettings(): array
     {
         $out = [];
-        foreach (Db::all('SELECT `key`, value FROM settings ORDER BY `key`') as $r) {
+        foreach (Db::all('SELECT `key`, value FROM site_settings ORDER BY `key`') as $r) {
             $out[(string) $r['key']] = (string) ($r['value'] ?? '');
         }
         return $out;
@@ -214,8 +214,8 @@ final class Admin
         } elseif ($plan['interval'] === 'yearly') {
             $expires = date('Y-m-d H:i:s', strtotime('+1 year'));
         } // unlimited => NULL (no expiry)
-        Db::run('UPDATE vip_memberships SET status = \'expired\' WHERE user_id = ? AND status = \'active\'', [$userId]);
-        Db::run('INSERT INTO vip_memberships (user_id, plan_id, status, expires_at) VALUES (?,?,?,?)',
+        Db::run('UPDATE vip_subscriptions SET status = \'expired\' WHERE user_id = ? AND status = \'active\'', [$userId]);
+        Db::run('INSERT INTO vip_subscriptions (user_id, plan_id, status, expires_at) VALUES (?,?,?,?)',
             [$userId, $planId, 'active', $expires]);
         Db::run('UPDATE users SET vip_active = 1, vip_expires_at = ? WHERE id = ?', [$expires, $userId]);
         self::audit($actorId, 'vip_grant', 'vip', null, null, ['user_id' => $userId, 'plan' => $plan['code']]);

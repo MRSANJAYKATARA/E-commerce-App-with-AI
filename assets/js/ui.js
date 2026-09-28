@@ -173,6 +173,7 @@ EL.ui = (function () {
     var def_ = routes[r.name];
     var content = EL.qs('#content');
     window.scrollTo(0, 0);
+    if (content) { content.scrollTop = 0; } /* anti-gravity: #content is the scroller */
     if (content) content.innerHTML = '';
     afterHooks = [];
     try { def_.handler(content, r.params); } catch (e) { console.error(e); if (content) content.innerHTML = errorBox(e.message || 'Failed to load'); }

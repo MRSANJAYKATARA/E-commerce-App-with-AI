@@ -60,6 +60,22 @@ function route(string $path, string $method): void
         Http::ok(['config' => Settings::publicConfig()]);
         return;
     }
+    // Uptime/health probe — exposes no internals.
+    if ($path === '/health' && $method === 'GET') {
+        try {
+            Db::one('SELECT 1 AS ok');
+        } catch (\Throwable $e) {
+            throw new ApiError('db_unavailable', 'Service temporarily unavailable', 503);
+        }
+        Http::ok(['status' => 'ok', 'db' => true, 'version' => '2.0.0', 'time' => gmdate('c')]);
+        return;
+    }
+    // Superadmin console login — dedicated email+password (zero Google dependency).
+    if ($path === '/admin/auth/login' && $method === 'POST') {
+        $in = Http::jsonBody();
+        Http::ok(Auth::adminLogin((string) ($in['email'] ?? ''), (string) ($in['password'] ?? '')));
+        return;
+    }
     if ($path === '/categories' && $method === 'GET') {
         Http::ok(['categories' => Store::categories()]);
         return;
@@ -408,6 +424,17 @@ function adminRoutes(string $path, string $method): void
 {
     $admin = Auth::authenticateAdmin();
     $adminId = (int) $admin['id'];
+
+    // Identity for the dedicated (email+password) admin session.
+    if ($path === '/admin/auth/me' && $method === 'GET') {
+        Http::ok(['admin' => $admin]);
+        return;
+    }
+    // Manual gateway recheck — re-verifies the latest payment intent against Cashfree.
+    if (preg_match('#^/admin/orders/(\d+)/recheck$#', $path, $m) && $method === 'POST') {
+        Http::ok(Payments::recheckForAdmin((int) $m[1], $adminId));
+        return;
+    }
 
     if ($path === '/admin/stats' && $method === 'GET') {
         Http::ok(['stats' => Admin::stats()]);

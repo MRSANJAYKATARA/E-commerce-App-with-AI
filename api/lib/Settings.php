@@ -16,7 +16,7 @@ final class Settings
     {
         if (self::$cache === null) {
             self::$cache = [];
-            foreach (Db::all('SELECT `key`, value FROM settings') as $row) {
+            foreach (Db::all('SELECT `key`, value FROM site_settings') as $row) {
                 self::$cache[(string) $row['key']] = (string) ($row['value'] ?? '');
             }
         }
@@ -26,7 +26,7 @@ final class Settings
     public static function set(string $key, ?string $value): void
     {
         Db::run(
-            'INSERT INTO settings (`key`, value) VALUES (?,?)
+            'INSERT INTO site_settings (`key`, value) VALUES (?,?)
              ON DUPLICATE KEY UPDATE value = VALUES(value)',
             [$key, $value]
         );

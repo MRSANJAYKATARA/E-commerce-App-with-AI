@@ -1,5 +1,6 @@
-/* ExamLegacy — Admin dashboard. Firebase Google Sign-In + admin role required.
-   All data comes from the verified /api/admin endpoints. No client-side trust. */
+/* ExamLegacy — Admin dashboard. Dedicated Email+Password auth (eladm_ HMAC
+   session tokens, zero Google dependency). All data comes from the verified
+   /api/admin endpoints. No client-side trust. */
 (function () {
   var API = '/api';
   var admin = null;
@@ -18,7 +19,7 @@
     document.documentElement.setAttribute('data-theme',dark?'dark':'light');
   }
 
-  async function token(){return admin? await firebase.auth().currentUser.getIdToken():null;}
+  async function token(){return localStorage.getItem('el_admin_secret')||null;}
   async function api(method,path,body,isForm){
     var headers={};
     var t=await token(); if(t) headers['Authorization']='Bearer '+t;
@@ -64,33 +65,45 @@
   }
 
   /* ---------- boot ---------- */
-  function boot(){
+  async function boot(){
     applyTheme();
     // PWA: same service worker as the student app (offline shell for /admin too).
     if ('serviceWorker' in navigator &&
         (location.protocol === 'https:' || /localhost|127\.0\.0\.1/.test(location.hostname))) {
       navigator.serviceWorker.register('/sw.js').catch(function () {});
     }
-    if(typeof firebase==='undefined'){showLogin('Firebase failed to load.');return;}
-    firebase.initializeApp((window.EL&&window.EL.FIREBASE_CONFIG)||{});
-    firebase.auth().onAuthStateChanged(async function(user){
-      if(!user){showLogin();return;}
-      try{
-        var me=await api('GET','/me');
-        if(me.user.role!=='admin'){showLogin('This account is not an administrator.');return;}
-        admin=me.user; renderShell();
-      }catch(e){showLogin(e.message);}
-    });
+    if (!token()) { showLogin(); return; }
+    try {
+      var me = await api('GET', '/admin/auth/me');
+      admin = (me && me.admin) || me;
+      renderShell();
+    } catch (e) {
+      localStorage.removeItem('el_admin_secret');
+      showLogin();
+    }
   }
   function showLogin(err){
     document.body.innerHTML='<div class="login"><div class="box"><img class="mark" src="/assets/img/logo.svg" alt="" width="84" height="84">'+
-      '<h1>ExamLegacy Admin</h1><p>Sign in with an administrator Google account.</p>'+
+      '<h1>ExamLegacy Admin</h1><p>Sign in with your administrator account.</p>'+
       (err?'<div class="badge red" style="margin-bottom:12px">'+esc(err)+'</div>':'')+
-      '<button class="btn block" id="adm-signin">'+icon('brands','fab fa-google')+' Continue with Google</button>'+
+      '<form id="adm-form" autocomplete="on">'+
+      '<input class="input" id="adm-email" type="email" placeholder="Admin email" autocomplete="username" required style="margin-bottom:10px">'+
+      '<input class="input" id="adm-pass" type="password" placeholder="Password" autocomplete="current-password" required style="margin-bottom:14px">'+
+      '<button class="btn block" type="submit" id="adm-signin">Sign in</button>'+
+      '</form>'+
       '<div class="tiny muted" style="margin-top:16px">SANJAYXLEGACY Powered By</div></div></div>';
-    var b=qs('#adm-signin'); if(b) b.addEventListener('click',async function(){
-      try{var p=new firebase.auth.GoogleAuthProvider();await firebase.auth().signInWithPopup(p);}
-      catch(e){toast(e.message,'err');}
+    qs('#adm-form').addEventListener('submit', async function (ev) {
+      ev.preventDefault();
+      var b = qs('#adm-signin'); b.disabled = true; b.textContent = 'Signing in…';
+      try {
+        var d = await api('POST', '/admin/auth/login', {
+          email: qs('#adm-email').value.trim(),
+          password: qs('#adm-pass').value
+        });
+        localStorage.setItem('el_admin_secret', d.token);
+        admin = d.admin;
+        renderShell();
+      } catch (e) { showLogin(e.message); }
     });
   }
 
@@ -121,7 +134,7 @@
     qsa('#nav [data-sec]').forEach(function(b){b.addEventListener('click',function(){go(b.getAttribute('data-sec'));qs('#sidebar').classList.remove('open');});});
     qs('#hamb').addEventListener('click',function(){qs('#sidebar').classList.toggle('open');});
     qs('#theme-btn').addEventListener('click',function(){var o=['light','dark','system'];var c=localStorage.getItem('el_theme')||'system';localStorage.setItem('el_theme',o[(o.indexOf(c)+1)%o.length]);applyTheme();});
-    qs('#signout').addEventListener('click',function(){firebase.auth().signOut();});
+    qs('#signout').addEventListener('click',function(){localStorage.removeItem('el_admin_secret');admin=null;showLogin();});
     go('dashboard');
   }
   function go(id){section=id;qsa('#nav [data-sec]').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-sec')===id);});
@@ -230,8 +243,12 @@
       try{var list=(await api('GET','/admin/orders'+(filter!=='all'?('?status='+filter):''))).orders||[];
         qs('#ot').innerHTML=list.length?('<table><thead><tr><th>Code</th><th>Status</th><th>Method</th><th>Total</th><th>Items</th><th>Date</th><th></th></tr></thead><tbody>'+
           list.map(function(o){return '<tr><td class="mono">'+esc(o.order_code)+'</td><td>'+statusBadge(o.status)+'</td><td>'+esc(o.payment_method)+'</td><td class="mono">'+money(o.total_paise,o.currency)+'</td><td>'+o.items.length+'</td><td class="tiny muted">'+new Date(o.created_at).toLocaleString()+'</td>'+
-            '<td style="white-space:nowrap"><button class="btn sm soft" data-view="'+o.id+'">View</button>'+(o.status==='paid'?' <button class="btn sm danger" data-refund="'+o.id+'">Refund</button>':'')+'</td></tr>';}).join('')+'</tbody></table>'):'<div class="muted" style="padding:16px">No orders.</div>';
+            '<td style="white-space:nowrap"><button class="btn sm soft" data-view="'+o.id+'">View</button> <button class=\"btn sm soft\" data-recheck=\"'+o.id+'\">Recheck</button>'+(o.status==='paid'?' <button class="btn sm danger" data-refund="'+o.id+'">Refund</button>':'')+'</td></tr>';}).join('')+'</tbody></table>'):'<div class="muted" style="padding:16px">No orders.</div>';
         qsa('[data-view]').forEach(function(b){b.addEventListener('click',function(){viewOrder(list.filter(function(o){return o.id==b.getAttribute('data-view');})[0]);});});
+        qsa('[data-recheck]').forEach(function(b){b.addEventListener('click',async function(){
+          try{var rc=await api('POST','/admin/orders/'+b.getAttribute('data-recheck')+'/recheck',{});toast('Rechecked: '+rc.after,'ok');load();}
+          catch(e){toast(e.message,'err');}
+        });});
         qsa('[data-refund]').forEach(function(b){b.addEventListener('click',async function(){
           if(await confirmDialog('Refund order?','Credits the total to the user wallet and revokes PDF access.',true)){
             try{await api('POST','/admin/orders/'+b.getAttribute('data-refund')+'/refund',{});toast('Refunded','ok');load();}catch(e){toast(e.message,'err');}

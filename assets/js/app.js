@@ -120,11 +120,14 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
     EL.qs('#btn-theme').addEventListener('click', cycleTheme);
     EL.qs('#btn-notif').addEventListener('click', function () { EL.ui.navigate('notifications'); });
 
-    // Frosted topbar on scroll (progressive enhancement).
+    // Frosted topbar on scroll (anti-gravity layout: #content is the scroller).
     var topbar = EL.qs('.topbar');
-    window.addEventListener('scroll', function () {
-      if (topbar) topbar.classList.toggle('scrolled', (window.scrollY || 0) > 8);
-    }, { passive: true });
+    var scroller = EL.qs('#content');
+    if (scroller && topbar) {
+      scroller.addEventListener('scroll', function () {
+        topbar.classList.toggle('scrolled', scroller.scrollTop > 8);
+      }, { passive: true });
+    }
   }
 
   function cycleTheme() {
@@ -995,7 +998,7 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
         if (a === 'vip') openVipSheet();
         else if (a === 'appearance') openAppearanceSheet();
         else if (a === 'profile') openProfileSheet();
-        else if (a === 'privacy') openInfoSheet('Privacy & Security', 'Your data is private. Purchased PDFs are never exposed at public URLs and are watermarked to your account. Financial records are stored securely server-side. We only expose the minimum information needed to run your account.');
+        else if (a === 'privacy') openInfoSheet('Privacy & Security', 'Your data is private. Purchased PDFs are never exposed at public URLs and are watermarked to your account. Financial records are stored securely server-side. We only expose the minimum information needed to run your account. <br><br><a href="/privacy.html" target="_blank" rel="noopener">Read the full Privacy Policy (DPDP Act 2023)</a>');
         else if (a === 'about') openAboutSheet();
         else if (a === 'install') promptInstall();
         else if (a === 'signout') EL.auth.signOut().then(function () { EL.ui.toast('Signed out'); EL.ui.navigate('home'); });

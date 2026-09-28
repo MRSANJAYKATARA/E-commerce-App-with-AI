@@ -131,6 +131,17 @@ define('PUBLIC_MEDIA_DIR', STORAGE_PATH . '/' . trim(env('PUBLIC_MEDIA_DIR', 'pu
 define('VIEWER_TOKEN_SECRET', env('VIEWER_TOKEN_SECRET', 'dev-insecure-change-me'));
 define('VIEWER_SESSION_TTL', (int) env('VIEWER_SESSION_TTL', '7200'));
 
+// ---- Superadmin console (dedicated email+password; ZERO Google dependency) ----
+define('ADMIN_EMAIL', env('ADMIN_EMAIL', ''));
+define('ADMIN_PASSWORD', env('ADMIN_PASSWORD', ''));
+define('ADMIN_TOKEN_TTL', (int) env('ADMIN_TOKEN_TTL', '2592000')); // 30 days (spec)
+define('ADMIN_TOKEN_SECRET', env('ADMIN_TOKEN_SECRET', (string) env('VIEWER_TOKEN_SECRET', 'dev-insecure-change-me')));
+
+// ---- Firestore real-time mirror (optional; server-side service account only) ----
+define('FIRESTORE_PROJECT_ID', env('FIRESTORE_PROJECT_ID', (string) env('FIREBASE_PROJECT_ID', '')));
+define('FIRESTORE_SERVICE_ACCOUNT', env('FIRESTORE_SERVICE_ACCOUNT', (string) env('FIREBASE_SERVICE_ACCOUNT', '')));
+define('FIRESTORE_SYNC', env_bool('FIRESTORE_SYNC', false));
+
 // Composer autoloader (PHPMailer, Firestore SDK) if dependencies are installed.
 $vendorAutoload = dirname(__DIR__) . '/vendor/autoload.php';
 if (is_file($vendorAutoload)) {

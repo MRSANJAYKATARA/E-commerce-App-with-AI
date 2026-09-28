@@ -18,7 +18,7 @@ final class Orders
     public static function memberDiscountPct(int $userId): int
     {
         $row = Db::one(
-            "SELECT p.benefits FROM vip_memberships m
+            "SELECT p.benefits FROM vip_subscriptions m
              JOIN vip_plans p ON p.id = m.plan_id
              WHERE m.user_id = ? AND m.status = 'active'
                AND (m.expires_at IS NULL OR m.expires_at > NOW())
@@ -35,7 +35,7 @@ final class Orders
     public static function isVip(int $userId): bool
     {
         return (int) Db::scalar(
-            "SELECT COUNT(*) FROM vip_memberships WHERE user_id = ? AND status = 'active'
+            "SELECT COUNT(*) FROM vip_subscriptions WHERE user_id = ? AND status = 'active'
                AND (expires_at IS NULL OR expires_at > NOW())",
             [$userId]
         ) > 0;
@@ -151,7 +151,7 @@ final class Orders
      */
     public static function markPaid(int $orderId, string $source = 'verify'): array
     {
-        return Db::transaction(function () use ($orderId, $source) {
+        $result = Db::transaction(function () use ($orderId, $source) {
             $order = Db::one('SELECT * FROM orders WHERE id = ? FOR UPDATE', [$orderId]);
             if ($order === null) {
                 throw new ApiError('not_found', 'Order not found', 404);
@@ -202,6 +202,20 @@ final class Orders
 
             return ['already_paid' => false, 'order_id' => $orderId, 'source' => $source];
         });
+
+        // Real-time secondary mirror (spec §2.2) — non-fatal; MySQL stays master.
+        $o = Db::one('SELECT order_code, user_id, status, total_paise, paid_at FROM orders WHERE id = ?', [$orderId]);
+        if ($o !== null) {
+            Firestore::doc('orders', (string) $orderId, [
+                'order_code'   => (string) $o['order_code'],
+                'user_id'      => (int) $o['user_id'],
+                'status'       => (string) $o['status'],
+                'total_paise'  => (int) $o['total_paise'],
+                'paid_at'      => $o['paid_at'] !== null ? (string) $o['paid_at'] : null,
+                'mirrored_at'  => gmdate('c'),
+            ]);
+        }
+        return $result;
     }
 
     public static function markFailed(int $orderId, string $reason): void

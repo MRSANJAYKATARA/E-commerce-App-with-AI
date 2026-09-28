@@ -143,6 +143,27 @@ final class Payments
         return ['status' => strtolower($orderStatus), 'kind' => (string) $intent['kind']];
     }
 
+    /** Admin-triggered recheck: re-verify the order's latest gateway intent. */
+    public static function recheckForAdmin(int $orderId, int $adminId): array
+    {
+        $order = Db::one('SELECT * FROM orders WHERE id = ?', [$orderId]);
+        if ($order === null) {
+            throw new ApiError('not_found', 'Order not found', 404);
+        }
+        $intent = Db::one(
+            'SELECT * FROM payment_intents WHERE order_id = ? ORDER BY id DESC LIMIT 1',
+            [$orderId]
+        );
+        if ($intent === null || empty($intent['provider_order_id'])) {
+            throw new ApiError('no_gateway_session', 'No gateway payment found for this order.', 422);
+        }
+        $before = (string) $order['status'];
+        $result = self::verifyIntent((int) $intent['user_id'], (int) $intent['id']);
+        $after = (string) (Db::one('SELECT status FROM orders WHERE id = ?', [$orderId])['status'] ?? $before);
+        Admin::audit($adminId, 'order.recheck', 'order', $orderId, ['status' => $before], ['status' => $after, 'gateway' => $result]);
+        return ['order_id' => $orderId, 'before' => $before, 'after' => $after, 'gateway' => $result];
+    }
+
     /** Cashfree webhook: verify signature, then settle idempotently. */
     public static function handleWebhook(): array
     {
@@ -166,6 +187,21 @@ final class Payments
         $payStatus = strtoupper((string) ($payment['payment_status'] ?? $order['order_status'] ?? ''));
         if ($cfOrderId === '') {
             throw new ApiError('invalid_body', 'Webhook missing order id', 400);
+        }
+        // Idempotency/audit log for this delivery (spec: webhook_events table).
+        try {
+            Db::run(
+                'INSERT IGNORE INTO webhook_events (event_id, source, payload_hash, status, processed_at)
+                 VALUES (?,?,?,?,NOW())',
+                [
+                    hash('sha256', $raw),
+                    'cashfree',
+                    hash('sha256', $raw),
+                    'received',
+                ]
+            );
+        } catch (\Throwable $e) {
+            error_log('[ExamLegacy] webhook_events log failed: ' . $e->getMessage());
         }
         $intent = Db::one('SELECT * FROM payment_intents WHERE provider_order_id = ?', [$cfOrderId]);
         if ($intent === null) {
@@ -261,13 +297,23 @@ final class Payments
         } elseif ($plan['interval'] === 'yearly') {
             $expires = date('Y-m-d H:i:s', strtotime('+1 year'));
         }
-        Db::run('UPDATE vip_memberships SET status = \'expired\' WHERE user_id = ? AND status = \'active\'', [$userId]);
-        Db::run('INSERT INTO vip_memberships (user_id, plan_id, status, expires_at) VALUES (?,?,?,?)',
+        Db::run('UPDATE vip_subscriptions SET status = \'expired\' WHERE user_id = ? AND status = \'active\'', [$userId]);
+        Db::run('INSERT INTO vip_subscriptions (user_id, plan_id, status, expires_at) VALUES (?,?,?,?)',
             [$userId, $planId, 'active', $expires]);
         Db::run('UPDATE users SET vip_active = 1, vip_expires_at = ? WHERE id = ?', [$expires, $userId]);
         Notifications::emit($userId, 'system', 'VIP PASS activated',
             'Your VIP PASS (' . $planName . ') is now active.', ['plan' => (string) $plan['code']],
             'vip_activate:' . $userId . ':' . $planId . ':' . date('Ymd'));
+        // Real-time secondary mirror (spec §2.2) — non-fatal.
+        Firestore::doc('vip_subscriptions', $userId . '_' . $planId, [
+            'user_id'    => $userId,
+            'plan_id'    => $planId,
+            'plan_code'  => (string) $plan['code'],
+            'plan_name'  => $planName,
+            'status'     => 'active',
+            'expires_at' => $expires,
+            'mirrored_at'=> gmdate('c'),
+        ]);
     }
 
     private static function verifyWebhookSignature(string $raw, string $sig, string $ts): bool
