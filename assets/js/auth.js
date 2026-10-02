@@ -48,7 +48,7 @@ EL.auth = (function () {
           email: firebaseUser.email || '',
           avatar_url: firebaseUser.photoURL || '',
           firebase_uid: firebaseUser.uid,
-          role: (firebaseUser.email === 'sanjaykatara59927@gmail.com' || firebaseUser.uid === '2RyGoMqyjqcXiBrp5gH1VdSLWx72') ? 'admin' : 'user',
+          role: 'user',                      // NEVER infer role client-side; server sets via /me
           status: 'active',
           wallet_balance_paise: 0,
           ai_credit_balance: 50,
