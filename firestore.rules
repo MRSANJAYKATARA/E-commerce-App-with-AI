@@ -1,22 +1,110 @@
-// ============================================================================
-// ExamLegacy — Cloud Firestore security rules (real-time mirror database).
-//
-// Architecture (spec §2.2): MySQL is the authoritative store; the API server
-// mirrors selected collections to Firestore using a SERVICE ACCOUNT (Admin-style
-// credentials BYPASS security rules). The browser app NEVER talks to Firestore
-// directly, so every client read/write stays denied by default.
-//
-// If you later ship a mobile/web client that reads the mirror, open ONLY the
-// specific read paths needed, e.g.:
-//   match /users/{uid} { allow read: if request.auth != null && request.auth.uid == uid; }
-// Keep writes closed — only the server may write.
-//
-// Deploy with: firebase deploy --only firestore:rules
-// ============================================================================
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Deny all client access — server-side mirroring only.
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.email == 'sanjaykatara59927@gmail.com' ||
+        request.auth.uid == '2RyGoMqyjqcXiBrp5gH1VdSLWx72' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.email == 'sanjaykatara59927@gmail.com')
+      );
+    }
+
+    // 1. Users Collection
+    // Read: Only the authenticated account owner or an admin
+    // Write: Server Service Account (bypasses rules) or Admin; owner can update name/avatar only
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) || isAdmin();
+      allow update: if isAdmin() || (
+        isOwner(userId) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'wallet_balance_paise', 'wallet_balance_inr', 'ai_credit_balance', 'vip_active'])
+      );
+      allow delete: if isAdmin();
+
+      // User notifications subcollection
+      match /notifications/{notifId} {
+        allow read, update: if isOwner(userId) || isAdmin();
+        allow write: if isAdmin();
+      }
+    }
+
+    // 2. Orders Collection
+    // Read: The student who placed the order or an admin
+    // Write: Strictly server-side or admin
+    match /orders/{orderNo} {
+      allow read: if isAdmin() || (
+        isAuthenticated() && (
+          resource.data.firebase_uid == request.auth.uid ||
+          (resource.data.user_id != null && resource.data.user_id == request.auth.uid)
+        )
+      );
+      allow write: if isAdmin();
+    }
+
+    // 3. Products Catalog
+    // Read: Public for published products
+    // Write: Admin only
+    match /products/{slug} {
+      allow read: if resource.data.is_published == true || isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // 4. Financial Wallet Transactions & Ledgers
+    // Read: Owner only (or admin)
+    // Write: Client write forbidden (double-entry ledger authority is server only)
+    match /wallet_transactions/{txId} {
+      allow read: if isAdmin() || (isAuthenticated() && resource.data.firebase_uid == request.auth.uid);
+      allow write: if false; // Only server Service Account can write
+    }
+
+    // 5. Audit & Tax Logs
+    // Read: Strictly admin only
+    // Write: Client write forbidden
+    match /audit_logs/{logId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // 6. Support Threads & Messages
+    match /support_threads/{threadId} {
+      allow read: if isAdmin() || (isAuthenticated() && resource.data.user_id == request.auth.uid);
+      allow create: if isAuthenticated();
+      allow update: if isAdmin() || (isAuthenticated() && resource.data.user_id == request.auth.uid);
+      allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+        allow read: if isAdmin() || (isAuthenticated() && get(/databases/$(database)/documents/support_threads/$(threadId)).data.user_id == request.auth.uid);
+        allow create: if isAuthenticated() && (
+          isAdmin() || get(/databases/$(database)/documents/support_threads/$(threadId)).data.user_id == request.auth.uid
+        );
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    // 7. System Status & Settings
+    match /system_status/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Default Fallback: Deny any unspecified path
     match /{document=**} {
       allow read, write: if false;
     }

@@ -11,7 +11,7 @@ EL.auth = (function () {
 
   function init() {
     if (typeof firebase === 'undefined') {
-      return Promise.reject(new Error('Firebase SDK not loaded'));
+      return Promise.reject(new Error('Authentication service temporarily unavailable. Please try again.'));
     }
     if (!firebase.apps || !firebase.apps.length) {
       firebase.initializeApp(EL.FIREBASE_CONFIG);
@@ -40,9 +40,25 @@ EL.auth = (function () {
     onChange: function (cb) { listeners.push(cb); },
     isReady: function () { return ready; },
     user: function () { return firebaseUser; },
-    profile: function () { return profile; },
+    profile: function () {
+      if (profile) return profile;
+      if (firebaseUser) {
+        return {
+          name: firebaseUser.displayName || 'Student',
+          email: firebaseUser.email || '',
+          avatar_url: firebaseUser.photoURL || '',
+          firebase_uid: firebaseUser.uid,
+          role: (firebaseUser.email === 'sanjaykatara59927@gmail.com' || firebaseUser.uid === '2RyGoMqyjqcXiBrp5gH1VdSLWx72') ? 'admin' : 'user',
+          status: 'active',
+          wallet_balance_paise: 0,
+          ai_credit_balance: 50,
+          vip_active: 0
+        };
+      }
+      return null;
+    },
     refreshProfile: function () {
-      return EL.api.get('/me').then(function (p) { profile = p.user; emit(); return profile; });
+      return EL.api.get('/me').then(function (p) { profile = p.user; emit(); return profile; }).catch(function () { return EL.auth.profile(); });
     },
     currentToken: async function () {
       if (!firebaseUser) return null;
@@ -54,9 +70,15 @@ EL.auth = (function () {
       provider.setCustomParameters({ prompt: 'select_account' });
       var result = await firebase.auth().signInWithPopup(provider);
       firebaseUser = result.user;
-      profile = await EL.api.get('/me').then(function (p) { return p.user; });
+      ready = true;
+      try {
+        var meRes = await EL.api.get('/me');
+        if (meRes && meRes.user) profile = meRes.user;
+      } catch (err) {
+        // Safe graceful degradation: profile remains populated from firebaseUser
+      }
       emit();
-      return profile;
+      return EL.auth.profile();
     },
     signOut: async function () {
       await firebase.auth().signOut();

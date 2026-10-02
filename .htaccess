@@ -4,15 +4,32 @@
 <IfModule mod_rewrite.c>
   RewriteEngine On
 
+  # Pass Authorization and custom auth headers through to PHP (FastCGI / Shared Hosting)
+  RewriteCond %{HTTP:Authorization} .
+  RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+  RewriteCond %{HTTP:X-Authorization} .
+  RewriteRule .* - [E=HTTP_X_AUTHORIZATION:%{HTTP:X-Authorization}]
+
+  RewriteCond %{HTTP:X-Firebase-Token} .
+  RewriteRule .* - [E=HTTP_X_FIREBASE_TOKEN:%{HTTP:X-Firebase-Token}]
+
   # Never serve secrets, dependencies, migrations, docs or PHP internals.
   RewriteRule (^|/)\.env - [F,L]
   RewriteRule ^vendor/ - [F,L]
   RewriteRule ^migrations/ - [F,L]
   RewriteRule ^docs/ - [F,L]
   RewriteRule ^storage/ - [F,L]
+  RewriteRule ^config/ - [F,L]
   RewriteRule ^api/lib/ - [F,L]
   RewriteRule ^api/config\.php$ - [F,L]
   RewriteRule ^composer\.(json|lock)$ - [F,L]
+
+  # Privacy Policy route (DPDP Act, 2023)
+  RewriteRule ^privacy/?$ privacy.html [L]
+
+  # 1-Click Database Installer route
+  RewriteRule ^install/?$ install.php [L]
 
   # Route all /api requests to the front controller.
   RewriteRule ^api(/.*)?$ api/index.php [QSA,L]

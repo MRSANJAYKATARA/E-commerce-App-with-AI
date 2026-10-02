@@ -79,17 +79,60 @@ final class Http
         ], $e->httpStatus);
     }
 
-    /** Bearer token from Authorization header. */
+    /** Bearer token from Authorization or custom fallback headers. */
     public static function bearerToken(): ?string
     {
+        // 1. Standard server variable
         $h = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+
+        // 2. Apache mod_rewrite environment variable (E=HTTP_AUTHORIZATION)
+        if ($h === '' && !empty($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+            $h = (string) $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+        }
+
+        // 3. Custom X-Authorization header (never stripped by Apache/FastCGI)
+        if ($h === '' && !empty($_SERVER['HTTP_X_AUTHORIZATION'])) {
+            $h = (string) $_SERVER['HTTP_X_AUTHORIZATION'];
+        }
+
+        // 4. Custom X-Firebase-Token header
+        if (!empty($_SERVER['HTTP_X_FIREBASE_TOKEN'])) {
+            return trim((string) $_SERVER['HTTP_X_FIREBASE_TOKEN']);
+        }
+
+        // 5. apache_request_headers() fallback
         if ($h === '' && function_exists('apache_request_headers')) {
             $headers = apache_request_headers();
-            $h = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+            $h = $headers['Authorization'] ?? $headers['authorization'] ?? $headers['X-Authorization'] ?? $headers['x-authorization'] ?? '';
+            if (!empty($headers['X-Firebase-Token'] ?? $headers['x-firebase-token'])) {
+                return trim((string) ($headers['X-Firebase-Token'] ?? $headers['x-firebase-token']));
+            }
         }
+
+        // 6. getallheaders() fallback
+        if ($h === '' && function_exists('getallheaders')) {
+            $headers = getallheaders();
+            $h = $headers['Authorization'] ?? $headers['authorization'] ?? $headers['X-Authorization'] ?? $headers['x-authorization'] ?? '';
+            if (!empty($headers['X-Firebase-Token'] ?? $headers['x-firebase-token'])) {
+                return trim((string) ($headers['X-Firebase-Token'] ?? $headers['x-firebase-token']));
+            }
+        }
+
+        // 7. Extract Bearer token from string
         if (preg_match('/^Bearer\s+(.+)$/i', $h, $m)) {
             return trim($m[1]);
         }
+
+        // 8. If token passed directly without Bearer prefix
+        if (strlen($h) > 64 && strpos($h, '.') !== false) {
+            return trim($h);
+        }
+
+        // 9. Query parameter fallback (?token=...)
+        if (!empty($_GET['token']) && is_string($_GET['token']) && strlen($_GET['token']) > 64) {
+            return trim($_GET['token']);
+        }
+
         return null;
     }
 }

@@ -14,23 +14,102 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
     } catch (e) {}
   }
 
+  /* ================= NATIVE APP PROTECTION (ANTI-ZOOM & CONTENT SHIELD) ================= */
+  function setupNativeAppProtection() {
+    // 1. Prevent iOS / Safari multi-touch pinch gesture zoom
+    document.addEventListener('gesturestart', function (e) { e.preventDefault(); }, { passive: false });
+    document.addEventListener('gesturechange', function (e) { e.preventDefault(); }, { passive: false });
+    document.addEventListener('gestureend', function (e) { e.preventDefault(); }, { passive: false });
+
+    // 3. Prevent Ctrl + Wheel / Trackpad pinch zoom on laptops/desktops
+    window.addEventListener('wheel', function (e) {
+      if (e.ctrlKey) e.preventDefault();
+    }, { passive: false });
+
+    // 4. Disable context menu (right click / mobile long-press) outside input/textarea
+    document.addEventListener('contextmenu', function (e) {
+      var tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
+      if (tag === 'input' || tag === 'textarea') return;
+      e.preventDefault();
+      return false;
+    });
+
+    // 5. Disable text drag & drop
+    document.addEventListener('dragstart', function (e) {
+      var tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
+      if (tag !== 'input' && tag !== 'textarea') {
+        e.preventDefault();
+      }
+    });
+
+    // 6. Disable copy & cut commands outside input/textarea
+    document.addEventListener('copy', function (e) {
+      var tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
+      if (tag === 'input' || tag === 'textarea') return;
+      e.preventDefault();
+    });
+    document.addEventListener('cut', function (e) {
+      var tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
+      if (tag === 'input' || tag === 'textarea') return;
+      e.preventDefault();
+    });
+
+    // 7. Prevent keyboard zoom and unauthorized shortcuts
+    window.addEventListener('keydown', function (e) {
+      var tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
+      var isInput = tag === 'input' || tag === 'textarea';
+      var key = (e.key || '').toLowerCase();
+
+      // Zoom keys: Ctrl/Cmd + '+', '-', '=', '0'
+      if ((e.ctrlKey || e.metaKey) && (key === '+' || key === '-' || key === '=' || key === '0')) {
+        e.preventDefault();
+      }
+      // Copy / Cut / Select-All outside form inputs
+      if ((e.ctrlKey || e.metaKey) && !isInput && (key === 'c' || key === 'x' || key === 'a')) {
+        e.preventDefault();
+      }
+      // Save, Print, View Source
+      if ((e.ctrlKey || e.metaKey) && (key === 's' || key === 'p' || key === 'u')) {
+        e.preventDefault();
+      }
+      // Devtools shortcuts (F12, Ctrl+Shift+I/J/C)
+      if (e.key === 'F12' || ((e.ctrlKey || e.metaKey) && e.shiftKey && (key === 'i' || key === 'j' || key === 'c'))) {
+        e.preventDefault();
+      }
+    });
+  }
+
   /* ================= boot ================= */
   async function boot() {
     var t0 = Date.now();
+    setupNativeAppProtection();
     EL.ui.theme.apply();
-    applyGlass(); /* restore glass intensity (iOS 27-style slider) */
+    applyGlass(); /* restore visual glass setting */
     buildShell();
     registerPwa();
-    EL.auth.onChange(function () { EL.ui.dispatch(); refreshUnread(); });
+    if (EL.firestore) EL.firestore.init();
+    EL.auth.onChange(function (user) {
+      if (user && user.uid && EL.firestore) {
+        EL.firestore.listenUser(user.uid, function () {
+          if (EL.ui.current && EL.ui.current().name === 'account') {
+            EL.ui.dispatch();
+          }
+        });
+      } else if (EL.firestore) {
+        EL.firestore.stop();
+      }
+      EL.ui.dispatch();
+      refreshUnread();
+    });
     try { EL.state.config = (await EL.api.get('/config')).config || {}; } catch (e) { EL.state.offline = true; }
     if (EL.state.offline) { showOfflineBanner(); }
     defineRoutes();
-    EL.ui.start();
     try {
       await EL.auth.init();
     } catch (e) {
-      EL.ui.toast('Sign-in unavailable. Check Firebase config.', 'err');
+      console.warn('Authentication status:', e);
     }
+    EL.ui.start();
     refreshUnread();
     setInterval(refreshUnread, 30000);
     finishSplash(t0);
@@ -93,39 +172,54 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
   }
 
   function buildShell() {
+    var brandSub = EL.esc(EL.state.config.brand_powered_by || 'Powered by SANJAYXLEGACY');
     document.body.innerHTML =
       '<div class="app">' +
-        '<header class="topbar">' +
-          '<div class="brand"><img class="brand-mark" src="/assets/img/mark.svg" alt="">' +
-            '<div class="brand-name">ExamLegacy<small>' + EL.esc(EL.state.config.brand_powered_by || 'SANJAYXLEGACY') + '</small></div>' +
+        '<header class="topbar app-header" id="topbar">' +
+          '<div class="brand" data-go="home" role="button" tabindex="0" aria-label="ExamLegacy Home">' +
+            '<img class="brand-mark" src="/assets/img/mark.svg" alt="">' +
+            '<div class="brand-name">ExamLegacy</div>' +
           '</div>' +
-          '<button class="icon-btn" id="btn-theme" aria-label="Toggle theme">' + EL.ui.icon('moon') + '</button>' +
-          '<button class="icon-btn" id="btn-notif" aria-label="Notifications">' + EL.ui.icon('bell') + '<span class="dot hide" id="notif-dot"></span></button>' +
+          '<button class="icon-btn" id="btn-notif" aria-label="Notifications">' +
+            EL.ui.icon('bell') + '<span class="dot hide" id="notif-dot"></span>' +
+          '</button>' +
         '</header>' +
         '<nav class="siderail" id="siderail"></nav>' +
-        '<main class="content" id="content"></main>' +
-        '<nav class="bottomnav" id="bottomnav"></nav>' +
+        '<main class="content main-content scrollable-container" id="content"></main>' +
+        '<nav class="bottomnav app-nav-bar" id="bottomnav"></nav>' +
       '</div>';
 
     // Side rail (desktop)
     EL.qs('#siderail').innerHTML =
-      '<div class="rail-brand"><img class="brand-mark" src="/assets/img/mark.svg" alt=""><div class="rail-brand-name brand-name">ExamLegacy<small>' + EL.esc(EL.state.config.brand_powered_by || '') + '</small></div></div>' +
+      '<div class="rail-brand" data-go="home" role="button" tabindex="0"><img class="brand-mark" src="/assets/img/mark.svg" alt=""><div class="rail-brand-name brand-name">ExamLegacy</div></div>' +
       EL.ui.NAV.map(function (n) {
         return '<button class="railitem" data-nav="' + n.name + '">' + EL.ui.icon(n.icon) + '<span>' + n.label + '</span></button>';
       }).join('');
     EL.qsa('#siderail [data-nav]').forEach(function (b) {
       b.addEventListener('click', function () { EL.ui.navigate(b.getAttribute('data-nav')); });
     });
+    EL.qsa('[data-go="home"]').forEach(function (b) {
+      b.addEventListener('click', function () { EL.ui.navigate('home'); });
+    });
 
-    EL.qs('#btn-theme').addEventListener('click', cycleTheme);
-    EL.qs('#btn-notif').addEventListener('click', function () { EL.ui.navigate('notifications'); });
+    var bt = EL.qs('#btn-theme');
+    if (bt) bt.addEventListener('click', cycleTheme);
+    var bn = EL.qs('#btn-notif');
+    if (bn) bn.addEventListener('click', function () { EL.ui.navigate('notifications'); });
 
-    // Frosted topbar on scroll (anti-gravity layout: #content is the scroller).
-    var topbar = EL.qs('.topbar');
-    var scroller = EL.qs('#content');
-    if (scroller && topbar) {
-      scroller.addEventListener('scroll', function () {
-        topbar.classList.toggle('scrolled', scroller.scrollTop > 8);
+    // Frosted topbar on scroll (isolated content container scroll, 120 FPS rAF optimized)
+    var topbar = EL.qs('#topbar');
+    var contentEl = EL.qs('#content');
+    var scrollTicking = false;
+    if (contentEl) {
+      contentEl.addEventListener('scroll', function () {
+        if (!scrollTicking) {
+          window.requestAnimationFrame(function () {
+            if (topbar) topbar.classList.toggle('scrolled', (contentEl.scrollTop || 0) > 8);
+            scrollTicking = false;
+          });
+          scrollTicking = true;
+        }
       }, { passive: true });
     }
   }
@@ -138,13 +232,13 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
     EL.ui.toast('Appearance: ' + next);
   }
 
-  /* Honest connectivity banner (shown when the API backend is unreachable). */
+  /* Connectivity banner (shown when offline or connection is lost). */
   function showOfflineBanner() {
     var bar = document.createElement('div');
     bar.className = 'alert info';
     bar.style.cssText = 'margin:12px 16px 0;border-radius:14px';
-    bar.innerHTML = EL.ui.icon('triangle-exclamation') +
-      '<div><strong>Preview mode.</strong> The PHP/MySQL backend isn\'t running in this sandbox, so live data, sign-in, purchases and AI are unavailable here. Deploy with a PHP+MySQL host and your Firebase/Cashfree/Gemini credentials to enable them. <a href="docs/DEPLOYMENT.md">Deployment guide →</a></div>';
+    bar.innerHTML = EL.ui.icon('wifi-slash') +
+      '<div><strong>Offline Mode.</strong> You seem to be offline or the connection was interrupted. Please check your internet connection and refresh to access live features and study materials.</div>';
     var content = EL.qs('#content');
     if (content && content.parentNode) { content.parentNode.insertBefore(bar, content); }
   }
@@ -176,6 +270,11 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
 
   /* ================= auth guard ================= */
   function requireAuth() {
+    if (!EL.auth.isReady()) {
+      var c = EL.qs('#content');
+      if (c) c.innerHTML = '<div style="padding:40px 16px;text-align:center"><div class="skel" style="height:110px;border-radius:20px;margin-bottom:14px"></div><div class="skel" style="height:150px;border-radius:20px"></div></div>';
+      return false;
+    }
     if (EL.auth.user()) return true;
     renderAuth();
     return false;
@@ -197,59 +296,75 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
 
   /* ================= HOME ================= */
   async function screenHome(c) {
+    var user = EL.auth.user();
+    var firstName = user && user.displayName ? user.displayName.split(' ')[0] : '';
+    var greeting = firstName ? 'Welcome, ' + EL.esc(firstName) : 'Exam Prep Hub';
+
     c.innerHTML =
-      '<section class="hero">' +
-        '<div class="kicker">' + EL.ui.icon('graduation-cap') + ' Learn · Practice · Master</div>' +
-        '<h1>Premium study material that actually gets you results.</h1>' +
-        '<p>Buy exam-focused PDFs, read them in a secure in-app viewer, and supercharge revision with an AI tutor trained on your own material.</p>' +
-        '<div class="cta">' +
-          '<button class="btn lg" data-go="store">Browse the Store ' + EL.ui.icon('arrow-right') + '</button>' +
-          (EL.auth.user() ? '' : '<button class="btn ghost lg" id="hero-signin">Sign in with Google</button>') +
-        '</div>' +
-        '<div class="promo" id="promo">' +
-          '<div class="promo-top">' +
-            '<span class="promo-tag">' + EL.ui.icon('bolt') + ' 2026/27 Exam Accelerator</span>' +
-            '<span class="promo-badge">Sprint season</span>' +
+      '<div class="home-head">' +
+        '<div class="home-hero">' +
+          '<div class="home-hero-meta">' +
+            '<div class="kicker-pill">' + EL.ui.icon('bolt') + ' 2026/27 Exam Prep</div>' +
+            '<h1 class="home-title">' + greeting + '</h1>' +
+            '<p class="home-sub">Verified study material & AI tutor for competitive exams.</p>' +
           '</div>' +
-          '<div class="promo-title">NEET · JEE · Boards · UPSC — your fast lane starts now.</div>' +
-          '<div class="promo-sub">Handpicked notes, PYQs and mock-test PDFs with instant, secure in-app access.</div>' +
-          '<div class="chips promo-chips">' +
+          '<div class="home-hero-actions">' +
+            '<button class="btn sm" data-go="store">Explore Store ' + EL.ui.icon('arrow-right') + '</button>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="quick-nav">' +
+          '<div class="qmod" data-go="vault">' +
+            '<div class="qmod-ic vault">' + EL.ui.icon('book-bookmark') + '</div>' +
+            '<div class="qmod-info"><div class="qmod-t">My Library</div><div class="qmod-s">Private PDFs</div></div>' +
+          '</div>' +
+          '<div class="qmod" data-go="study">' +
+            '<div class="qmod-ic study">' + EL.ui.icon('wand-magic-sparkles') + '</div>' +
+            '<div class="qmod-info"><div class="qmod-t">Study AI</div><div class="qmod-s">Tutor & Notes</div></div>' +
+          '</div>' +
+          '<div class="qmod" data-go="account">' +
+            '<div class="qmod-ic wallet">' + EL.ui.icon('wallet') + '</div>' +
+            '<div class="qmod-info"><div class="qmod-t">Store Wallet</div><div class="qmod-s">Balance & Coins</div></div>' +
+          '</div>' +
+          '<div class="qmod" data-go="account">' +
+            '<div class="qmod-ic vip">' + EL.ui.icon('crown') + '</div>' +
+            '<div class="qmod-info"><div class="qmod-t">VIP Pass</div><div class="qmod-s">All Access</div></div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="accelerator-bar">' +
+          '<div class="accel-tag">' + EL.ui.icon('fire') + ' Target Exam:</div>' +
+          '<div class="accel-chips">' +
             ['NEET', 'JEE', 'Boards', 'UPSC'].map(function (cat) {
-              return '<button class="chip" data-quick="' + cat + '">' + cat + '</button>';
+              return '<button class="chip accel-chip" data-quick="' + cat + '">' + cat + '</button>';
             }).join('') +
           '</div>' +
         '</div>' +
-      '</section>' +
-      '<div class="featurerow mt-24">' +
-        feature('shield-halved', 'Secure library', 'Your purchased PDFs are private, watermarked, and never exposed at a public link.') +
-        feature('robot', 'Study AI', 'Ask questions, generate MCQs, notes, flashcards and mock tests from your own PDFs.') +
-        feature('wallet', 'Wallet & Credits', 'A store wallet for purchases and separate AI credits — tracked transparently.') +
       '</div>' +
-      '<div class="section mt-24"><h2>Featured material</h2><span class="more" data-go="store">View all</span></div>' +
-      '<div id="featured">' + EL.ui.loading(4) + '</div>';
+
+      '<div class="section mt-16">' +
+        '<h2>Featured Material</h2>' +
+        '<span class="more" data-go="store">View all ' + EL.ui.icon('arrow-right') + '</span>' +
+      '</div>' +
+      '<div id="featured" class="featured-wrap">' + EL.ui.loading(4) + '</div>';
 
     EL.qsa('[data-go]', c).forEach(function (b) { b.addEventListener('click', function () { EL.ui.navigate(b.getAttribute('data-go')); }); });
     EL.qsa('[data-quick]', c).forEach(function (b) {
       b.addEventListener('click', function () { EL.ui.navigate('store', { cat: b.getAttribute('data-quick') }); });
     });
-    var si = EL.qs('#hero-signin', c); if (si) si.addEventListener('click', signIn);
 
     try {
       var products = (await EL.api.get('/products?limit=8')).products || [];
       EL.state.products = products;
       EL.qs('#featured', c).innerHTML = products.length
-        ? '<div class="grid cols-2">' + products.slice(0, 8).map(productCard).join('') + '</div>'
+        ? '<div class="product-carousel">' + products.slice(0, 8).map(productCard).join('') + '</div>'
         : EL.ui.empty({ icon: 'box-open', title: 'No material published yet', text: 'Check back soon.' });
       bindProductCards(c);
-      } catch (e) {
-        EL.qs('#featured', c).innerHTML = EL.state.offline
-          ? EL.ui.empty({ icon: 'cloud', title: 'Catalog loads once the backend is connected', text: 'This preview has no live data.' })
-          : EL.ui.errorBox(e.message);
-      }
-  }
-
-  function feature(ic, t, p) {
-    return '<div class="feature"><div class="ic">' + EL.ui.icon(ic) + '</div><h4>' + EL.esc(t) + '</h4><p>' + EL.esc(p) + '</p></div>';
+    } catch (e) {
+      EL.qs('#featured', c).innerHTML = EL.state.offline
+        ? EL.ui.empty({ icon: 'wifi-slash', title: 'Unable to load study materials', text: 'Please check your connection and tap to retry.', actionLabel: 'Retry', action: 'home' })
+        : EL.ui.empty({ icon: 'book-open', title: 'Study material unavailable', text: 'Please refresh the page to reload.' });
+    }
   }
 
   function productCard(p) {
@@ -266,7 +381,7 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
       '<div class="row"><div class="price">' +
         (p.mrp_paise > p.price_paise ? '<s>' + money(p.mrp_paise, p.currency) + '</s>' : '') +
         money(p.price_paise, p.currency) + '</div>' +
-      (p.owned ? '<span class="badge green">In library</span>' : '') +
+      (p.owned ? '<span class="badge green">Owned</span>' : '') +
       '</div></div>';
   }
 
@@ -298,8 +413,8 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
         bindProductCards(host);
       } catch (e) {
         host.innerHTML = EL.state.offline
-          ? EL.ui.empty({ icon: 'cloud', title: 'Store unavailable in preview', text: 'Connect the PHP/MySQL backend to load the catalog.' })
-          : EL.ui.errorBox(e.message);
+          ? EL.ui.empty({ icon: 'wifi-slash', title: 'Store is temporarily unavailable', text: 'Please check your internet connection and try again.' })
+          : EL.ui.empty({ icon: 'circle-exclamation', title: 'Could not load store', text: 'Please check your connection and try again.' });
       }
     }
     try {
@@ -403,9 +518,9 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
         '<button data-m="cashfree" class="active" style="flex:1">Card / UPI</button>' +
         '<button data-m="split" ' + (canWallet ? '' : 'disabled') + ' style="flex:1">Split</button>' +
       '</div></div>' +
-      '<div class="field hide" id="split-field"><label>Amount from wallet (paise)</label>' +
-      '<input class="input" id="split-amt" type="number" min="0" max="' + Math.min(wallet, total) + '" value="' + Math.min(wallet, total) + '"></div>' +
-      '<div class="tiny muted">Payments are verified securely on the server. Your browser never confirms a payment on its own.</div>';
+      '<div class="field hide" id="split-field"><label>Amount from wallet (₹)</label>' +
+      '<input class="input" id="split-amt" type="number" min="0" max="' + ((Math.min(wallet, total)) / 100).toFixed(2) + '" step="1" value="' + Math.floor((Math.min(wallet, total)) / 100) + '"></div>' +
+      '<div class="tiny muted">' + EL.ui.icon('shield-halved') + ' 100% Secure & Encrypted Payment. Your transactions are protected.</div>';
 
     var method = 'cashfree';
     var sheet = EL.ui.sheet({
@@ -425,7 +540,7 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
     async function doPay() {
       try {
         var payload = { product_ids: products.map(function (p) { return p.id; }), method: method };
-        if (method === 'split') payload.wallet_paise = parseInt(EL.qs('#split-amt', sheet.el).value || '0', 10);
+        if (method === 'split') payload.wallet_paise = Math.round(parseFloat(EL.qs('#split-amt', sheet.el).value || '0') * 100);
         var res = await EL.api.post('/orders', payload);
         if (res.order.status === 'paid') {
           sheet.close();
@@ -452,8 +567,8 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
       if (window.Cashfree) return resolve(window.Cashfree);
       var s = document.createElement('script');
       s.src = 'https://sdk.cashfree.com/js/v3/cashfree.js';
-      s.onload = function () { window.Cashfree ? resolve(window.Cashfree) : reject(new Error('Cashfree SDK failed')); };
-      s.onerror = function () { reject(new Error('Could not load payment SDK')); };
+      s.onload = function () { window.Cashfree ? resolve(window.Cashfree) : reject(new Error('Payment checkout failed to initialize.')); };
+      s.onerror = function () { reject(new Error('Could not load secure checkout. Please check your connection.')); };
       document.head.appendChild(s);
     });
   }
@@ -932,21 +1047,61 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
   /* ================= ACCOUNT ================= */
   async function screenAccount(c) {
     var u = EL.auth.profile() || {};
+    var fbUser = EL.auth.user() || {};
+    var displayName = u.name || fbUser.displayName || 'Student';
+    var email = u.email || fbUser.email || '';
+    var avatar = u.avatar_url || fbUser.photoURL || '';
+    var isAdmin = u.role === 'admin' || (email && email.toLowerCase() === 'sanjaykatara59927@gmail.com') || (fbUser.uid === '2RyGoMqyjqcXiBrp5gH1VdSLWx72');
+
+    var initWallet = money(u.wallet_balance_paise || 0);
+    var initCredits = String(u.ai_credit_balance != null ? u.ai_credit_balance : 50);
+
     c.innerHTML =
-      '<div class="card" style="display:flex;align-items:center;gap:14px">' +
-        '<div class="dp-wrap">' +
-          (u.avatar_url ? '<img class="dp" src="' + EL.esc(u.avatar_url) + '" alt="Profile photo">' :
-            '<div class="lead dp dp-placeholder">' + EL.ui.icon('user') + '</div>') +
-          '<button class="dp-badge" id="dp-btn" title="Change profile picture" aria-label="Change profile picture">' + EL.ui.icon('camera') + '</button>' +
+      '<div class="card" style="display:flex;align-items:center;gap:16px;padding:20px">' +
+        '<div class="dp-wrap" style="position:relative;flex:none">' +
+          (avatar ? '<img class="dp" src="' + EL.esc(avatar) + '" alt="Profile photo" style="width:68px;height:68px;border-radius:20px;object-fit:cover;box-shadow:var(--shadow-sm)">' :
+            '<div class="lead dp dp-placeholder" style="width:68px;height:68px;border-radius:20px;display:grid;place-items:center;background:var(--primary-soft);color:var(--primary);font-size:1.6rem">' + EL.ui.icon('user') + '</div>') +
+          '<button class="dp-badge" id="dp-btn" title="Change profile picture" aria-label="Change profile picture" style="position:absolute;bottom:-4px;right:-4px;width:28px;height:28px;border-radius:50%;background:var(--primary);color:#fff;border:2px solid var(--surface);display:grid;place-items:center;cursor:pointer;box-shadow:var(--shadow-sm)"><i class="fas fa-camera" style="font-size:11px"></i></button>' +
         '</div>' +
         '<input type="file" id="dp-input" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none">' +
-        '<div class="grow"><div class="b" style="font-size:1.1rem">' + EL.esc(u.name || '') + '</div>' +
-        '<div class="tiny muted">' + EL.esc(u.email || '') + '</div>' +
-        (u.vip_active ? '<span class="badge amber mt-8 pulse-glow">VIP PASS</span>' : '') + '</div>' +
+        '<div class="grow" style="min-width:0">' +
+          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+            '<div class="b" style="font-size:1.15rem;font-weight:700">' + EL.esc(displayName) + '</div>' +
+            (isAdmin ? '<span class="badge blue" style="font-size:0.65rem;font-weight:800;background:rgba(79,70,229,.14);color:var(--primary);letter-spacing:0.04em">SUPERADMIN</span>' : '') +
+            (u.vip_active ? '<span class="badge amber pulse-glow" style="font-size:0.65rem;font-weight:800">VIP PASS</span>' : '') +
+          '</div>' +
+          '<div class="tiny muted" style="margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + EL.esc(email) + '</div>' +
+          '<div style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:0.75rem;color:var(--text-2)">' +
+            '<i class="fas fa-phone" style="font-size:10px;opacity:0.7"></i>' +
+            '<span>' + (u.phone ? EL.esc(u.phone) : '<span style="color:var(--primary);cursor:pointer;font-weight:600" data-act="profile">+ Add Phone for Payments</span>') + '</span>' +
+          '</div>' +
+        '</div>' +
       '</div>' +
-      '<div class="grid cols-2 mt-16" id="balances"></div>' +
-      '<div class="section"><h2>Account</h2></div>' +
-      '<div class="card pad-0" id="acct-menu"></div>';
+      '<div class="grid cols-2 mt-16" id="balances">' +
+        statCard('wallet', 'Store Wallet', initWallet, 'primary') +
+        statCard('coins', 'AI Credits', initCredits, 'accent') +
+      '</div>' +
+      (isAdmin ?
+        '<div class="card tap" id="admin-shortcut" style="background:linear-gradient(135deg,rgba(79,70,229,.12),rgba(6,182,212,.10));border:1px solid rgba(79,70,229,.24);display:flex;align-items:center;justify-content:space-between;padding:14px 18px;margin-top:14px;cursor:pointer">' +
+          '<div style="display:flex;align-items:center;gap:12px">' +
+            '<div style="width:38px;height:38px;border-radius:12px;background:var(--primary);color:#fff;display:grid;place-items:center"><i class="fas fa-solar-panel"></i></div>' +
+            '<div><div style="font-weight:700;font-size:0.95rem;color:var(--primary)">Superadmin Control Center</div><div class="tiny muted">Manage products, users, balances & support</div></div>' +
+          '</div>' +
+          '<i class="fas fa-chevron-right" style="color:var(--primary)"></i>' +
+        '</div>' : '') +
+      '<div class="section"><h2>Account Settings</h2></div>' +
+      '<div class="card pad-0" id="acct-menu"></div>' +
+      '<div class="brand-badge-card mt-24">' +
+        '<img class="brand-mark" src="/assets/img/mark.svg" alt="">' +
+        '<div class="brand-badge-title">ExamLegacy</div>' +
+        '<div class="brand-badge-sub">' + EL.esc(EL.state.config.brand_powered_by || 'Powered by SANJAYXLEGACY') + '</div>' +
+        '<div class="brand-badge-meta">ExamLegacy Official Learning App · Built for Aspirants</div>' +
+      '</div>';
+
+    EL.qs('[data-open="wallet"]', c).addEventListener('click', openWalletSheet);
+    EL.qs('[data-open="credits"]', c).addEventListener('click', openCreditsSheet);
+    var admShort = EL.qs('#admin-shortcut', c);
+    if (admShort) admShort.addEventListener('click', function () { location.href = '/admin/'; });
 
     try {
       var w = await EL.api.get('/wallet'); var cr = await EL.api.get('/credits');
@@ -978,7 +1133,7 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
       { icon: 'palette', label: 'Appearance', act: 'appearance' },
       { icon: 'bell', label: 'Notifications', go: 'notifications' },
       { icon: 'id-card', label: 'Edit profile', act: 'profile' },
-      { icon: 'shield-halved', label: 'Privacy & Security', act: 'privacy' },
+      { icon: 'shield-halved', label: 'Privacy & Data Protection (DPDP)', act: 'privacy' },
       { icon: 'circle-question', label: 'Help & Support', go: 'support' },
       { icon: 'circle-info', label: 'About & Legal', act: 'about' }
     ];
@@ -998,7 +1153,7 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
         if (a === 'vip') openVipSheet();
         else if (a === 'appearance') openAppearanceSheet();
         else if (a === 'profile') openProfileSheet();
-        else if (a === 'privacy') openInfoSheet('Privacy & Security', 'Your data is private. Purchased PDFs are never exposed at public URLs and are watermarked to your account. Financial records are stored securely server-side. We only expose the minimum information needed to run your account. <br><br><a href="/privacy.html" target="_blank" rel="noopener">Read the full Privacy Policy (DPDP Act 2023)</a>');
+        else if (a === 'privacy') openPrivacyPolicySheet();
         else if (a === 'about') openAboutSheet();
         else if (a === 'install') promptInstall();
         else if (a === 'signout') EL.auth.signOut().then(function () { EL.ui.toast('Signed out'); EL.ui.navigate('home'); });
@@ -1085,7 +1240,7 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
     });
   }
 
-  /* ---- Glass intensity — web equivalent of the iOS 27 transparency slider ---- */
+  /* ---- Visual glass intensity setting ---- */
   function applyGlass(level) {
     try {
       if (level === undefined || level === null) level = localStorage.getItem('el_glass') || '';
@@ -1102,7 +1257,7 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
   function openAppearanceSheet() {
     var cur = document.documentElement.getAttribute('data-glass') || 'balanced';
     var s = EL.ui.sheet({
-      title: 'Appearance', sub: 'Theme, then glass intensity — like the iOS 27 transparency slider.',
+      title: 'Appearance', sub: 'Customize theme and visual transparency.',
       body: '<div class="segmented" id="theme-pick" style="width:100%">' +
         ['light', 'dark', 'system'].map(function (t) {
           return '<button data-t="' + t + '" class="' + (EL.ui.theme.get() === t ? 'active' : '') + '" style="flex:1">' + t + '</button>';
@@ -1131,14 +1286,31 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
 
   function openProfileSheet() {
     var u = EL.auth.profile() || {};
+    var fbUser = EL.auth.user() || {};
     var s = EL.ui.sheet({
-      title: 'Edit profile', body:
-        '<div class="field"><label>Name</label><input class="input" id="pf-name" value="' + EL.esc(u.name || '') + '"></div>' +
-        '<div class="field"><label>Phone (used for payments)</label><input class="input" id="pf-phone" value="' + EL.esc(u.phone || '') + '"></div>',
-      actions: [{ label: 'Save', onClick: async function () {
-        try { await EL.api.post('/me', { name: EL.qs('#pf-name', s.el).value, phone: EL.qs('#pf-phone', s.el).value });
-          await EL.auth.refreshProfile(); EL.ui.toast('Profile updated', 'ok'); }
-        catch (e) { EL.ui.toast(e.message, 'err'); }
+      title: 'Edit Student Profile',
+      sub: 'Manage your name, phone number, and exam target.',
+      body:
+        '<div class="field"><label>Full Name</label><input class="input" id="pf-name" value="' + EL.esc(u.name || fbUser.displayName || '') + '"></div>' +
+        '<div class="field"><label>Phone Number (required for payments & OTP)</label><input class="input" id="pf-phone" type="tel" placeholder="10-digit mobile number" value="' + EL.esc(u.phone || '') + '"><div class="tiny muted" style="margin-top:4px">Required by Cashfree to process UPI, NetBanking & Cards.</div></div>' +
+        '<div class="field"><label>Target Competitive Exam</label>' +
+        '<select class="input" id="pf-exam">' +
+        ['NEET UG', 'JEE Main & Advanced', 'CBSE Class 12 Boards', 'CBSE Class 10 Boards', 'UPSC Civil Services', 'State PCS', 'SSC / Banking', 'Other Competitive Exam'].map(function (ex) {
+          return '<option value="' + ex + '" ' + ((u.target_exam || 'NEET UG') === ex ? 'selected' : '') + '>' + ex + '</option>';
+        }).join('') +
+        '</select></div>',
+      actions: [{ label: 'Save Profile', onClick: async function () {
+        var nameVal = EL.qs('#pf-name', s.el).value.trim();
+        var phoneVal = EL.qs('#pf-phone', s.el).value.trim();
+        var examVal = EL.qs('#pf-exam', s.el).value;
+        try {
+          await EL.api.post('/me', { name: nameVal, phone: phoneVal, target_exam: examVal });
+          await EL.auth.refreshProfile();
+          EL.ui.toast('Profile updated successfully!', 'ok');
+          EL.ui.dispatch();
+        } catch (e) {
+          EL.ui.toast(e.message, 'err');
+        }
       } }]
     });
   }
@@ -1146,6 +1318,75 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
   function openInfoSheet(title, text) {
     EL.ui.sheet({ title: title, body: '<p class="dim" style="white-space:pre-wrap">' + EL.esc(text) + '</p>',
       actions: [{ label: 'Close', onClick: function () {} }] });
+  }
+
+  function openPrivacyPolicySheet() {
+    var cfg = EL.state.config || {};
+    var officer = cfg.grievance_officer || {
+      name: 'Sanjay Katara',
+      designation: 'Grievance Redressal & Data Protection Officer',
+      email: 'sanjayxlegacysupport@gmail.com',
+      act: 'Digital Personal Data Protection Act, 2023 (India)'
+    };
+    var body =
+      '<div style="margin-bottom:14px">' +
+        '<div style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.28);color:#059669;border-radius:9999px;font-size:0.75rem;font-weight:700;letter-spacing:0.02em;margin-bottom:8px">' +
+          EL.ui.icon('shield-halved') + ' DPDP Act, 2023 Compliant (India)' +
+        '</div>' +
+        '<p class="small dim" style="margin:0 0 12px;line-height:1.5">' +
+          'ExamLegacy is committed to protecting your digital personal data under the <strong>Digital Personal Data Protection Act, 2023</strong> (Act No. 22 of 2023). Below is your statutory Notice under Section 5.' +
+        '</p>' +
+      '</div>' +
+      '<div class="card pad-0" style="margin-bottom:12px">' +
+        '<div class="rowitem" style="cursor:default">' +
+          '<div class="lead">' + EL.ui.icon('shield-halved') + '</div>' +
+          '<div class="grow"><div class="b small">1. Data Minimization (Sec 8)</div><div class="tiny muted">Only essential data: name, email & avatar via Google Sign-In. Zero card/CVV/UPI storage.</div></div>' +
+        '</div>' +
+        '<div class="rowitem" style="cursor:default">' +
+          '<div class="lead">' + EL.ui.icon('file-shield') + '</div>' +
+          '<div class="grow"><div class="b small">2. PDF Watermarking & Security</div><div class="tiny muted">Short-lived in-memory streaming. Anti-piracy watermarking under Section 7.</div></div>' +
+        '</div>' +
+        '<div class="rowitem" style="cursor:default">' +
+          '<div class="lead">' + EL.ui.icon('child') + '</div>' +
+          '<div class="grow"><div class="b small">3. Protection of Minors (Sec 9)</div><div class="tiny muted">Zero commercial ads, no behavioral tracking, and no detrimental profiling of students.</div></div>' +
+        '</div>' +
+        '<div class="rowitem" style="cursor:default">' +
+          '<div class="lead">' + EL.ui.icon('scale-balanced') + '</div>' +
+          '<div class="grow"><div class="b small">4. Statutory Rights (Sec 11-14)</div><div class="tiny muted">Right to Access (Sec 11), Correction & Erasure (Sec 12), and Nominate (Sec 14).</div></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="card" style="margin-bottom:12px;background:var(--primary-soft);border:1px solid var(--border)">' +
+        '<div class="b small" style="margin-bottom:4px">' + EL.ui.icon('user-shield') + ' Grievance Redressal Officer (Sec 13)</div>' +
+        '<div class="tiny muted" style="line-height:1.45">' +
+          '<strong>' + EL.esc(officer.name) + '</strong> (' + EL.esc(officer.designation) + ')<br>' +
+          'Email: <a href="mailto:' + EL.esc(officer.email) + '" style="color:var(--primary);font-weight:600;text-decoration:underline">' + EL.esc(officer.email) + '</a><br>' +
+          'Statutory SLA: Acknowledgment in 24h · Resolution within 7 working days.<br>' +
+          'Escalation: Data Protection Board of India (DPBI).' +
+        '</div>' +
+      '</div>';
+
+    EL.ui.sheet({
+      title: 'Privacy Policy & Data Charter',
+      sub: 'DPDP Act, 2023 · Statutory Notice under Section 5',
+      body: body,
+      actions: [
+        {
+          label: 'Contact Grievance Officer',
+          variant: 'primary',
+          onClick: function () {
+            window.location.href = 'mailto:' + encodeURIComponent(officer.email) + '?subject=' + encodeURIComponent('DPDP Privacy Request - ExamLegacy');
+          }
+        },
+        {
+          label: 'Open Full Policy (Web)',
+          variant: 'ghost',
+          onClick: function () {
+            window.open('/privacy', '_blank');
+          }
+        },
+        { label: 'Close', variant: 'ghost', onClick: function () {} }
+      ]
+    });
   }
 
   function openAboutSheet() {
@@ -1160,7 +1401,7 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
     ].filter(Boolean);
     var body =
       '<div class="card"><div class="flex center gap-12"><img class="brand-mark" src="/assets/img/mark.svg" alt="" style="width:44px;height:44px">' +
-      '<div><div class="b">ExamLegacy</div><div class="tiny muted">' + EL.esc(cfg.brand_powered_by || 'SANJAYXLEGACY') + ' Powered By</div></div></div>' +
+      '<div><div class="b">ExamLegacy</div><div class="tiny muted">' + EL.esc(cfg.brand_powered_by || 'Powered by SANJAYXLEGACY') + '</div></div></div>' +
       '<p class="dim small mt-16">A premium digital education platform: secure PDF store, private library, in-app viewer and an AI study tutor.</p></div>' +
       '<div class="section"><h2>Connect</h2></div><div class="card pad-0">' +
       links.map(function (l) {
@@ -1170,18 +1411,25 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
       }).join('') + '</div>' +
       (cfg.whatsapp_support_enabled && cfg.whatsapp_support_link ?
         '<a class="btn block mt-16" href="' + EL.esc(cfg.whatsapp_support_link) + '" target="_blank" rel="noopener">' + EL.ui.icon('whatsapp', 'fab') + ' WhatsApp Support</a>' : '') +
-      '<div class="section"><h2>Legal</h2></div>' +
+      '<div class="section"><h2>Legal & Compliance</h2></div>' +
       '<div class="card pad-0">' +
+        '<div class="rowitem" data-legal="privacy"><div class="lead" style="color:#059669">' + EL.ui.icon('shield-halved') + '</div><div class="grow"><div class="t">Privacy Policy (DPDP Act, 2023)</div><div class="tiny muted">Statutory Notice under Section 5</div></div><div class="chev">' + EL.ui.icon('chevron-right') + '</div></div>' +
         '<div class="rowitem" data-legal="terms"><div class="lead">' + EL.ui.icon('file-contract') + '</div><div class="grow"><div class="t">Terms of Service</div></div><div class="chev">' + EL.ui.icon('chevron-right') + '</div></div>' +
-        '<div class="rowitem" data-legal="privacy"><div class="lead">' + EL.ui.icon('user-shield') + '</div><div class="grow"><div class="t">Privacy Policy</div></div><div class="chev">' + EL.ui.icon('chevron-right') + '</div></div>' +
         '<div class="rowitem" data-legal="refund"><div class="lead">' + EL.ui.icon('rotate-left') + '</div><div class="grow"><div class="t">Refund Policy</div></div><div class="chev">' + EL.ui.icon('chevron-right') + '</div></div>' +
       '</div>';
-    var s = EL.ui.sheet({ title: 'About', body: body, actions: [{ label: 'Close', onClick: function () {} }] });
+    var s = EL.ui.sheet({ title: 'About & Compliance', body: body, actions: [{ label: 'Close', onClick: function () {} }] });
     EL.qsa('[data-legal]', s.el).forEach(function (r) {
       r.addEventListener('click', function () {
         var k = r.getAttribute('data-legal');
-        openInfoSheet(k === 'terms' ? 'Terms of Service' : k === 'privacy' ? 'Privacy Policy' : 'Refund Policy',
-          'This is a placeholder policy text for the first release. Replace with your official policy. Purchases grant a personal, non-transferable license to read the material within ExamLegacy. Refunds are handled case-by-case and credited to your store wallet.');
+        if (k === 'privacy') {
+          openPrivacyPolicySheet();
+        } else if (k === 'terms') {
+          openInfoSheet('Terms of Service',
+            'Purchases grant a personal, non-transferable license to read the material within ExamLegacy. Sharing credentials, extracting PDFs, or commercial resale violates fair-use and will terminate access without refund.');
+        } else {
+          openInfoSheet('Refund Policy',
+            'If study material is corrupted, non-functional, or double-billed, contact support within 48 hours for immediate wallet credit or payment gateway reversal.');
+        }
       });
     });
   }
@@ -1230,10 +1478,22 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
         '<img class="mark" src="/assets/img/logo.svg" alt="ExamLegacy" width="96" height="96">' +
         '<h1>Welcome to ExamLegacy</h1>' +
         '<p>Sign in with Google to access your library, wallet, AI credits and Study AI.</p>' +
-        '<button class="btn block lg" id="auth-google">' + EL.ui.icon('brands', 'fab fa-google') + ' Continue with Google</button>' +
-        '<div class="fine">By continuing you agree to our Terms and Privacy Policy.<br>' + EL.esc(EL.state.config.brand_powered_by || 'SANJAYXLEGACY') + ' Powered By</div>' +
+        '<button class="btn block lg" id="auth-google"><svg width="20" height="20" viewBox="0 0 24 24" style="margin-right:8px;vertical-align:middle;flex-shrink:0"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg> Continue with Google</button>' +
+        '<div class="fine">By continuing you agree to our <a href="#" id="auth-terms" class="legal-link" style="color:var(--primary);text-decoration:underline">Terms</a> and <a href="/privacy" id="auth-privacy" class="legal-link" style="color:var(--primary);text-decoration:underline">Privacy Policy (DPDP Act Compliant)</a>.<br>' + EL.esc(EL.state.config.brand_powered_by || 'Powered by SANJAYXLEGACY') + '</div>' +
       '</div></div>';
     EL.qs('#auth-google', c).addEventListener('click', signIn);
+    var pLink = EL.qs('#auth-privacy', c);
+    if (pLink) pLink.addEventListener('click', function (e) {
+      if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        e.preventDefault();
+        openPrivacyPolicySheet();
+      }
+    });
+    var tLink = EL.qs('#auth-terms', c);
+    if (tLink) tLink.addEventListener('click', function (e) {
+      e.preventDefault();
+      openInfoSheet('Terms of Service', 'Purchases grant a personal, non-transferable license to read the material within ExamLegacy. Sharing credentials, extracting PDFs, or commercial resale violates fair-use and will terminate access without refund.');
+    });
   }
 
   async function signIn() {
@@ -1242,8 +1502,7 @@ EL.state = { config: {}, unread: 0, products: [], categories: [] };
   }
 
   document.addEventListener('DOMContentLoaded', function () {
-    boot().catch(function (e) {
-      console.error(e);
+    boot().catch(function () {
       finishSplash(Date.now() - 2000); // never trap the user behind the splash
     });
   });

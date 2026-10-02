@@ -190,6 +190,17 @@ final class Support
         }
         $cost = max(0, (int) Settings::get('ai_credit_cost_support', '1'));
         if (AiCredits::balance($userId) < $cost) {
+            try {
+                AiCredits::credit(
+                    $userId,
+                    20,
+                    'trial',
+                    'welcome_support_' . $userId,
+                    'Welcome Support AI Credits'
+                );
+            } catch (\Throwable $e) {}
+        }
+        if (AiCredits::balance($userId) < $cost) {
             throw new ApiError('insufficient_credits', 'Not enough AI credits to use Support AI.', 402);
         }
         $system = 'You are ExamLegacy Support AI. You help with account, login, payment, order, wallet, '

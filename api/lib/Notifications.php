@@ -35,7 +35,23 @@ final class Notifications
                     $eventKey,
                 ]
             );
-            return Db::insertId();
+            $notifId = (int) Db::insertId();
+            if ($userId !== null) {
+                try {
+                    $u = Db::one('SELECT firebase_uid FROM users WHERE id = ?', [$userId]);
+                    if ($u && !empty($u['firebase_uid'])) {
+                        Firestore::setDocument("users/{$u['firebase_uid']}/notifications", (string) $notifId, [
+                            'id'         => $notifId,
+                            'category'   => $category,
+                            'title'      => $title,
+                            'body'       => $body,
+                            'is_read'    => false,
+                            'created_at' => gmdate('Y-m-d\TH:i:s\Z'),
+                        ]);
+                    }
+                } catch (\Throwable $e) {}
+            }
+            return $notifId;
         } catch (\PDOException $e) {
             // Duplicate event_key (1062) => already emitted; ignore.
             if ($e->errorInfo[1] ?? 0 === 1062) {

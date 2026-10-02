@@ -18,33 +18,51 @@ final class Db
         if (self::$pdo instanceof PDO) {
             return self::$pdo;
         }
-        // Spec §3: smart local failover — if the configured remote host is
-        // unreachable, automatically retry against 127.0.0.1 before failing.
+        $dsn = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=%s', DB_HOST, DB_PORT, DB_NAME, DB_CHARSET);
         $options = [
             PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_EMULATE_PREPARES   => false,
             PDO::ATTR_STRINGIFY_FETCHES  => false,
         ];
-        $hosts = [DB_HOST];
-        if (DB_HOST !== '127.0.0.1' && DB_HOST !== 'localhost') {
-            $hosts[] = '127.0.0.1';
-        }
-        $last = null;
-        foreach ($hosts as $host) {
-            $dsn = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=%s', $host, DB_PORT, DB_NAME, DB_CHARSET);
+        $isLocalDev = (PHP_SAPI === 'cli-server') ||
+                      in_array(explode(':', $_SERVER['HTTP_HOST'] ?? '')[0], ['localhost', '127.0.0.1'], true);
+
+        if ($isLocalDev && DB_HOST !== '127.0.0.1' && DB_HOST !== 'localhost') {
             try {
-                self::$pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
-                if ($host !== DB_HOST) {
-                    error_log('[ExamLegacy] DB failover: remote host unreachable, connected via 127.0.0.1');
-                }
+                $localDsn = sprintf('mysql:host=127.0.0.1;port=3306;dbname=%s;charset=%s', DB_NAME, DB_CHARSET);
+                self::$pdo = new PDO($localDsn, 'root', '', $options);
                 return self::$pdo;
-            } catch (PDOException $e) {
-                $last = $e;
-                error_log('[ExamLegacy] DB connection failed (' . $host . '): ' . $e->getMessage());
+            } catch (\Throwable $localErr) {
+                try {
+                    $localDsn2 = 'mysql:host=127.0.0.1;port=3306;dbname=examlegacy;charset=utf8mb4';
+                    self::$pdo = new PDO($localDsn2, 'root', '', $options);
+                    return self::$pdo;
+                } catch (\Throwable $localErr2) {}
             }
         }
-        throw new \RuntimeException('Database unavailable', 0, $last);
+
+        try {
+            self::$pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
+        } catch (PDOException $e) {
+            // If remote DB host fails (e.g. testing locally on device where remote InfinityFree MySQL is unreachable)
+            if (DB_HOST !== '127.0.0.1' && DB_HOST !== 'localhost') {
+                try {
+                    $localDsn = sprintf('mysql:host=127.0.0.1;port=3306;dbname=%s;charset=%s', DB_NAME, DB_CHARSET);
+                    self::$pdo = new PDO($localDsn, 'root', '', $options);
+                    return self::$pdo;
+                } catch (\Throwable $localErr) {
+                    try {
+                        $localDsn2 = 'mysql:host=127.0.0.1;port=3306;dbname=examlegacy;charset=utf8mb4';
+                        self::$pdo = new PDO($localDsn2, 'root', '', $options);
+                        return self::$pdo;
+                    } catch (\Throwable $localErr2) {}
+                }
+            }
+            error_log('[ExamLegacy] DB connection failed: ' . $e->getMessage());
+            throw new \RuntimeException('Database unavailable: ' . $e->getMessage(), 0, $e);
+        }
+        return self::$pdo;
     }
 
     public static function run(string $sql, array $params = []): \PDOStatement

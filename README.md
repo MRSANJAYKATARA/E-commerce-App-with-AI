@@ -1,6 +1,6 @@
 # ExamLegacy
 
-**SANJAYXLEGACY Powered By** — a premium, production-oriented digital education platform.
+**Powered by SANJAYXLEGACY** — a premium, production-oriented digital education platform.
 
 ExamLegacy is not a PDF-selling page. It is a complete student ecosystem: a secure PDF
 store, a private digital library, a secure in-app PDF viewer, a Gemini-powered **Study AI**,
@@ -17,15 +17,13 @@ Browser (HTML5 + CSS3 + Vanilla JS)
    │  Firebase Google Sign-In  →  short-lived ID token (Authorization: Bearer)
    ▼
 PHP API  (api/index.php front controller  +  api/lib/*)
-   │  verifies the Firebase token (students) or the dedicated admin session,
-   │  maps to a MySQL user, re-checks every authorization
+   │  verifies the Firebase token, maps to a MySQL user, re-checks every authorization
    ▼
 MySQL  (authoritative: users, orders, wallet ledger, AI-credit ledger, PDF access, …)
    │
-   ├─ Cashfree  (server-side order create + verification + signed webhook + event log)
+   ├─ Cashfree  (server-side order create + verification + signed webhook)
    ├─ Gemini    (server-side Study/Support/Help AI; key never leaves the server)
-   ├─ Firestore (OPTIONAL real-time mirror; service-account writes, client rules deny all)
-   ├─ SMTP      (transactional email)
+   ├─ PHPMailer (transactional email)
    └─ Protected storage (storage/pdfs, storage/uploads) — never served at a public URL
 ```
 
@@ -112,13 +110,8 @@ php -S 0.0.0.0:8000 server.php
 ```
 
 Open `http://localhost:8000/` (student app) and `http://localhost:8000/admin/`.
-
-**Admin console** signs in with the dedicated email + password from `.env`
-(`ADMIN_EMAIL` / `ADMIN_PASSWORD`) — zero Google dependency. Legacy
-role-based Google admins still work: `UPDATE users SET role='admin' WHERE email='you@example.com';`
-
-**Database:** `mysql … < database.sql` (schema + seed) **or** open `/install.php`
-once (1-click setup; delete it + `install.lock` afterwards).
+To make a user an admin: `UPDATE users SET role='admin' WHERE email='you@example.com';`
+after their first Google sign-in.
 
 See **docs/DEPLOYMENT.md** for Apache/Nginx, webhooks, and the deployment/rollback process.
 
@@ -128,12 +121,6 @@ See **docs/DEPLOYMENT.md** for Apache/Nginx, webhooks, and the deployment/rollba
 
 - **Auth:** Firebase Google Sign-In; server verifies the ID token signature + claims, then maps
   to a MySQL user (created on first login). Blocked/disabled accounts are rejected server-side.
-- **Admin auth:** dedicated email + password (`eladm_` HMAC-SHA256 session tokens, 30-day TTL,
-  rate-limited login) — fully independent of Google; accepted alongside legacy role-based sessions.
-- **Realtime mirror (optional):** `FIRESTORE_SYNC=1` dual-writes users/orders/VIP docs to
-  Firestore via service-account REST calls; `firestore.rules` denies all client access.
-- **Ops:** `GET /api/health` (db ping), `install.php` one-click DB setup, `database.sql` master
-  import, `migrations/upgrade_v21.sql` for older databases, smart MySQL failover to 127.0.0.1.
 - **Store:** browse/search/filter published products; per-user "owned" flag from real access.
 - **Payments:** Cashfree orders created server-side; orders become **PAID** only after a verified
   gateway fetch or a **signature-verified webhook** (idempotent). Browser callbacks are never trusted.
@@ -198,7 +185,7 @@ See **docs/DEPLOYMENT.md** for Apache/Nginx, webhooks, and the deployment/rollba
 
 ## Branding
 
-- Product owner: **Sanjay Katara** · Brand: **SANJAYXLEGACY** · "SANJAYXLEGACY Powered By"
+- Product owner: **Sanjay Katara** · Brand: **SANJAYXLEGACY** · "Powered by SANJAYXLEGACY"
 - Support email: sanjayxlegacysupport@gmail.com
 - Social/channel links and the WhatsApp-support toggle are **admin-configured** (see Settings).
   WhatsApp Support is **OFF by default**; no personal WhatsApp number is hard-coded.

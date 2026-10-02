@@ -11,48 +11,23 @@
 
 ## 1. Database
 
-Option A — master file (schema + seed in one):
-
 ```bash
 mysql -u root -p -e "CREATE DATABASE examlegacy CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-mysql -u root -p examlegacy < database.sql
-```
-
-Option B — 1-click installer (shared hosting friendly):
-
-```bash
-# visit /install.php once — imports schema+seed+upgrades, writes install.lock, then DELETE install.php
-```
-
-Option C — step by step:
-
-```bash
 mysql -u root -p examlegacy < migrations/schema.sql
 mysql -u root -p examlegacy < migrations/seed.sql
-```
-
-Existing databases created before the 21-table spec alignment:
-
-```bash
-mysql -u root -p examlegacy < migrations/upgrade_v21.sql   # renames legacy tables + adds spec tables
 ```
 
 ## 2. Configuration
 
 ```bash
 cp .env.example .env
-# edit .env — set DB_*, FIREBASE_PROJECT_ID, CASHFREE_*, GEMINI_API_KEY, SMTP_*,
-#             ADMIN_EMAIL + ADMIN_PASSWORD (console login), VIEWER_TOKEN_SECRET
+# edit .env — set DB_*, FIREBASE_PROJECT_ID, CASHFREE_*, GEMINI_API_KEY, SMTP_*, VIEWER_TOKEN_SECRET
 ```
 
-- `VIEWER_TOKEN_SECRET` must be a long random string (also backs admin session signing unless `ADMIN_TOKEN_SECRET` is set).
-- `ADMIN_EMAIL` / `ADMIN_PASSWORD` = the **only** credentials for `/admin` (email+password, zero Google dependency).
-- `FIRESTORE_SYNC=1` + `FIRESTORE_SERVICE_ACCOUNT` = optional real-time mirror; deploy `firestore.rules` with
-  `firebase deploy --only firestore:rules` (client access stays denied — server-only writes).
+- `VIEWER_TOKEN_SECRET` must be a long random string.
 - `APP_ENV=production` and `APP_DEBUG=0` in production (never expose errors).
-- Put the Firebase **web** config in `assets/js/config.js` (`EL.FIREBASE_CONFIG`) — students only.
-- `composer install` only if you opt into PHPMailer (the bundled SMTP client works without it).
-- Health probe for uptime monitors: `GET /api/health` → `{"status":"ok","db":true,...}`.
+- Put the Firebase **web** config in `assets/js/config.js` (`EL.FIREBASE_CONFIG`).
+- `composer install` to install PHPMailer.
 
 ### Keep app code out of the web root (recommended)
 
@@ -119,17 +94,13 @@ Set PHP upload limits to allow PDF uploads:
 
 ## 6. First admin
 
-The console at `/admin` uses a **dedicated email + password** (zero Google dependency):
-
-1. Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `.env`.
-2. Sign in at `/admin` with those credentials (HMAC session token, 30 days).
-3. Optionally also promote a signed-in Google user for legacy role-based access:
+After a user signs in once via Google:
 
 ```sql
 UPDATE users SET role='admin' WHERE email='you@example.com';
 ```
 
-Both paths are accepted by the API; the email+password path is the primary one.
+Then sign in at `/admin`.
 
 ## 7. Go-live checklist
 

@@ -18,7 +18,7 @@ final class Orders
     public static function memberDiscountPct(int $userId): int
     {
         $row = Db::one(
-            "SELECT p.benefits FROM vip_subscriptions m
+            "SELECT p.benefits FROM vip_memberships m
              JOIN vip_plans p ON p.id = m.plan_id
              WHERE m.user_id = ? AND m.status = 'active'
                AND (m.expires_at IS NULL OR m.expires_at > NOW())
@@ -35,7 +35,7 @@ final class Orders
     public static function isVip(int $userId): bool
     {
         return (int) Db::scalar(
-            "SELECT COUNT(*) FROM vip_subscriptions WHERE user_id = ? AND status = 'active'
+            "SELECT COUNT(*) FROM vip_memberships WHERE user_id = ? AND status = 'active'
                AND (expires_at IS NULL OR expires_at > NOW())",
             [$userId]
         ) > 0;
@@ -137,6 +137,12 @@ final class Orders
         // Wallet-only: confirm immediately (atomic debit + grant).
         if ($gatewayAmount === 0) {
             self::markPaid($orderId, 'wallet');
+        } else {
+            try {
+                $rawOrder = Db::one('SELECT * FROM orders WHERE id = ?', [$orderId]);
+                $rawItems = Db::all('SELECT * FROM order_items WHERE order_id = ?', [$orderId]);
+                if ($rawOrder) Firestore::syncOrder($rawOrder, $rawItems);
+            } catch (\Throwable $e) {}
         }
 
         return [
@@ -203,18 +209,13 @@ final class Orders
             return ['already_paid' => false, 'order_id' => $orderId, 'source' => $source];
         });
 
-        // Real-time secondary mirror (spec §2.2) — non-fatal; MySQL stays master.
-        $o = Db::one('SELECT order_code, user_id, status, total_paise, paid_at FROM orders WHERE id = ?', [$orderId]);
-        if ($o !== null) {
-            Firestore::doc('orders', (string) $orderId, [
-                'order_code'   => (string) $o['order_code'],
-                'user_id'      => (int) $o['user_id'],
-                'status'       => (string) $o['status'],
-                'total_paise'  => (int) $o['total_paise'],
-                'paid_at'      => $o['paid_at'] !== null ? (string) $o['paid_at'] : null,
-                'mirrored_at'  => gmdate('c'),
-            ]);
-        }
+        // Dual-sync to Firestore (post-commit)
+        try {
+            $paidOrder = Db::one('SELECT * FROM orders WHERE id = ?', [$orderId]);
+            $orderItems = Db::all('SELECT * FROM order_items WHERE order_id = ?', [$orderId]);
+            if ($paidOrder) Firestore::syncOrder($paidOrder, $orderItems);
+        } catch (\Throwable $e) {}
+
         return $result;
     }
 

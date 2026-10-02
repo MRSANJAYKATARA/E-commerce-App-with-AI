@@ -55,6 +55,14 @@ final class Wallet
             Db::run('UPDATE users SET wallet_balance_paise = ? WHERE id = ?', [$balance, $userId]);
             return $balance;
         });
+
+        // Dual-sync updated balance to Cloud Firestore
+        try {
+            $u = Db::one('SELECT * FROM users WHERE id = ?', [$userId]);
+            if ($u) Firestore::syncUser($u);
+        } catch (\Throwable $e) {}
+
+        return $result;
     }
 
     /** Debit (decrease) the wallet. Fails atomically if funds are insufficient. */
@@ -73,7 +81,7 @@ final class Wallet
         if (!in_array($type, ['purchase', 'adjustment'], true)) {
             throw new ApiError('invalid_type', 'Invalid wallet transaction type', 400);
         }
-        return Db::transaction(function () use ($userId, $amount, $type, $idempotencyKey, $description, $orderId, $createdBy) {
+        $result = Db::transaction(function () use ($userId, $amount, $type, $idempotencyKey, $description, $orderId, $createdBy) {
             $user = Db::one('SELECT wallet_balance_paise FROM users WHERE id = ? FOR UPDATE', [$userId]);
             if ($user === null) {
                 throw new ApiError('not_found', 'User not found', 404);
@@ -96,6 +104,14 @@ final class Wallet
             Db::run('UPDATE users SET wallet_balance_paise = ? WHERE id = ?', [$balance, $userId]);
             return $balance;
         });
+
+        // Dual-sync updated balance to Cloud Firestore
+        try {
+            $u = Db::one('SELECT * FROM users WHERE id = ?', [$userId]);
+            if ($u) Firestore::syncUser($u);
+        } catch (\Throwable $e) {}
+
+        return $result;
     }
 
     /** Full, append-only transaction history for the user. */

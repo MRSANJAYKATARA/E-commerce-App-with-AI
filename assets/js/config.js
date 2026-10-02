@@ -8,12 +8,14 @@ window.EL = window.EL || {};
 EL.API_BASE = '/api';
 
 EL.FIREBASE_CONFIG = {
-  apiKey: "YOUR_FIREBASE_WEB_API_KEY",
-  authDomain: "YOUR_PROJECT.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT.appspot.com",
-  messagingSenderId: "000000000000",
-  appId: "1:000000000000:web:abcdef"
+  apiKey: "AIzaSyDZubfc4H-IJdCwHNy52EVyepZPkWvaU0A",
+  authDomain: "examlegacy-19d4b.firebaseapp.com",
+  databaseURL: "https://examlegacy-19d4b-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "examlegacy-19d4b",
+  storageBucket: "examlegacy-19d4b.firebasestorage.app",
+  messagingSenderId: "126565552242",
+  appId: "1:126565552242:web:4255851fa86a0d9cfe72eb",
+  measurementId: "G-XBGVJEBRRL"
 };
 
 EL.APP_NAME = 'ExamLegacy';
