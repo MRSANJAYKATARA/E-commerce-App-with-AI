@@ -17,11 +17,11 @@ EL.viewer = (function () {
       var s = document.createElement('script');
       s.src = PDFJS_SRC;
       s.onload = function () {
-        if (!window.pdfjsLib) return reject(new Error('PDF.js failed to load'));
+        if (!window.pdfjsLib) return reject(new Error('Document viewer failed to load. Please try again.'));
         window.pdfjsLib.GlobalWorkerOptions.workerSrc = WORKER_SRC;
         resolve(window.pdfjsLib);
       };
-      s.onerror = function () { reject(new Error('Could not load the PDF engine')); };
+      s.onerror = function () { reject(new Error('Could not load document viewer. Please check your connection.')); };
       document.head.appendChild(s);
     });
     return pdfjsPromise;

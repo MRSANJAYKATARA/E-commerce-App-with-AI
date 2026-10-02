@@ -1,6 +1,5 @@
-/* ExamLegacy — Admin dashboard. Dedicated Email+Password auth (eladm_ HMAC
-   session tokens, zero Google dependency). All data comes from the verified
-   /api/admin endpoints. No client-side trust. */
+/* ExamLegacy — Admin dashboard. Firebase Google Sign-In + admin role required.
+   All data comes from the verified /api/admin endpoints. No client-side trust. */
 (function () {
   var API = '/api';
   var admin = null;
@@ -19,10 +18,50 @@
     document.documentElement.setAttribute('data-theme',dark?'dark':'light');
   }
 
-  async function token(){return localStorage.getItem('el_admin_secret')||null;}
+  var adminApp = null;
+  var adminAuth = null;
+  var SUPERADMIN_EMAIL = 'sanjaykatara59927@gmail.com';
+  var SUPERADMIN_UID = '2RyGoMqyjqcXiBrp5gH1VdSLWx72';
+
+  function getAdminAuth() {
+    if (adminAuth) return adminAuth;
+    if (typeof firebase === 'undefined') return null;
+    var fbConfig = (window.EL && window.EL.FIREBASE_CONFIG) || {};
+    try {
+      if (firebase.apps && firebase.apps.length) {
+        var existing = firebase.apps.find(function(a){return a.name === 'ExamLegacyAdminApp';});
+        if (existing) { adminApp = existing; adminAuth = adminApp.auth(); return adminAuth; }
+      }
+      adminApp = firebase.initializeApp(fbConfig, 'ExamLegacyAdminApp');
+    } catch(e) {
+      try { adminApp = firebase.app('ExamLegacyAdminApp'); } catch(err) { adminApp = firebase.app(); }
+    }
+    adminAuth = adminApp.auth();
+    return adminAuth;
+  }
+
+  function isSuperadmin(email, uid) {
+    if (uid && uid === SUPERADMIN_UID) return true;
+    if (email && email.toLowerCase() === SUPERADMIN_EMAIL.toLowerCase()) return true;
+    return false;
+  }
+
+  async function token(){
+    var secret = localStorage.getItem('el_admin_secret');
+    if (secret) return secret;
+    var auth = getAdminAuth();
+    if (auth && auth.currentUser) {
+      try { return await auth.currentUser.getIdToken(); } catch(e){}
+    }
+    return null;
+  }
   async function api(method,path,body,isForm){
     var headers={};
-    var t=await token(); if(t) headers['Authorization']='Bearer '+t;
+    var t=await token();
+    if(t) {
+      headers['Authorization']='Bearer '+t;
+      headers['X-Admin-Token']=t;
+    }
     var opts={method:method,headers:headers};
     if(isForm){opts.body=body;}
     else if(body!==undefined&&method!=='GET'){headers['Content-Type']='application/json';opts.body=JSON.stringify(body);}
@@ -64,82 +103,271 @@
     });
   }
 
+  async function verifyAdminKey(key){
+    try{
+      var res=await fetch(API+'/admin/stats',{headers:{'Authorization':'Bearer '+key,'X-Admin-Token':key}});
+      var data=await res.json();
+      if(res.ok && data.ok){
+        localStorage.setItem('el_admin_secret',key);
+        admin={role:'admin',name:'Super Admin',email:'admin@examlegacy.com'};
+        try {
+          var me = await fetch(API+'/me',{headers:{'Authorization':'Bearer '+key,'X-Admin-Token':key}}).then(r=>r.json());
+          if(me.ok && me.data && me.data.user) admin = me.data.user;
+        } catch(e){}
+        renderShell();
+        return true;
+      }
+    }catch(e){}
+    return false;
+  }
+
+  function setupNativeAppProtection() {
+    document.addEventListener('gesturestart', function (e) { e.preventDefault(); }, { passive: false });
+    document.addEventListener('gesturechange', function (e) { e.preventDefault(); }, { passive: false });
+    document.addEventListener('gestureend', function (e) { e.preventDefault(); }, { passive: false });
+    var lastTouchTime = 0;
+    document.addEventListener('touchend', function (e) {
+      var now = Date.now();
+      if (now - lastTouchTime <= 300) {
+        var tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
+        if (tag !== 'input' && tag !== 'textarea') e.preventDefault();
+      }
+      lastTouchTime = now;
+    }, { passive: false });
+    window.addEventListener('wheel', function (e) { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+    document.addEventListener('contextmenu', function (e) {
+      var tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
+      if (tag === 'input' || tag === 'textarea') return;
+      e.preventDefault();
+      return false;
+    });
+    window.addEventListener('keydown', function (e) {
+      var tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
+      var isInput = tag === 'input' || tag === 'textarea';
+      var key = (e.key || '').toLowerCase();
+      if ((e.ctrlKey || e.metaKey) && (key === '+' || key === '-' || key === '=' || key === '0')) e.preventDefault();
+      if ((e.ctrlKey || e.metaKey) && (key === 's' || key === 'p' || key === 'u')) e.preventDefault();
+      if (e.key === 'F12' || ((e.ctrlKey || e.metaKey) && e.shiftKey && (key === 'i' || key === 'j' || key === 'c'))) e.preventDefault();
+    });
+  }
+
   /* ---------- boot ---------- */
   async function boot(){
+    setupNativeAppProtection();
     applyTheme();
-    // PWA: same service worker as the student app (offline shell for /admin too).
     if ('serviceWorker' in navigator &&
         (location.protocol === 'https:' || /localhost|127\.0\.0\.1/.test(location.hostname))) {
       navigator.serviceWorker.register('/sw.js').catch(function () {});
     }
-    if (!token()) { showLogin(); return; }
-    try {
-      var me = await api('GET', '/admin/auth/me');
-      admin = (me && me.admin) || me;
-      renderShell();
-    } catch (e) {
-      localStorage.removeItem('el_admin_secret');
-      showLogin();
-    }
-  }
-  function showLogin(err){
-    document.body.innerHTML='<div class="login"><div class="box"><img class="mark" src="/assets/img/logo.svg" alt="" width="84" height="84">'+
-      '<h1>ExamLegacy Admin</h1><p>Sign in with your administrator account.</p>'+
-      (err?'<div class="badge red" style="margin-bottom:12px">'+esc(err)+'</div>':'')+
-      '<form id="adm-form" autocomplete="on">'+
-      '<input class="input" id="adm-email" type="email" placeholder="Admin email" autocomplete="username" required style="margin-bottom:10px">'+
-      '<input class="input" id="adm-pass" type="password" placeholder="Password" autocomplete="current-password" required style="margin-bottom:14px">'+
-      '<button class="btn block" type="submit" id="adm-signin">Sign in</button>'+
-      '</form>'+
-      '<div class="tiny muted" style="margin-top:16px">SANJAYXLEGACY Powered By</div></div></div>';
-    qs('#adm-form').addEventListener('submit', async function (ev) {
-      ev.preventDefault();
-      var b = qs('#adm-signin'); b.disabled = true; b.textContent = 'Signing in…';
+    var savedSecret = localStorage.getItem('el_admin_secret');
+    if (savedSecret) {
       try {
-        var d = await api('POST', '/admin/auth/login', {
-          email: qs('#adm-email').value.trim(),
-          password: qs('#adm-pass').value
-        });
-        localStorage.setItem('el_admin_secret', d.token);
-        admin = d.admin;
-        renderShell();
-      } catch (e) { showLogin(e.message); }
-    });
+        var me = await api('GET', '/me');
+        if (me && me.user && me.user.role === 'admin') {
+          admin = me.user;
+          renderShell();
+          return;
+        }
+      } catch (e) {
+        localStorage.removeItem('el_admin_secret');
+      }
+    }
+    showLogin();
   }
 
-  var SECTIONS=[
-    {id:'dashboard',label:'Dashboard',icon:'gauge-high'},
-    {id:'products',label:'Products',icon:'book'},
-    {id:'orders',label:'Orders',icon:'receipt'},
-    {id:'users',label:'Users',icon:'users'},
-    {id:'support',label:'Support',icon:'headset'},
-    {id:'notifications',label:'Notifications',icon:'bell'},
-    {id:'vip',label:'VIP PASS',icon:'crown'},
-    {id:'packs',label:'Credit packs',icon:'coins'},
-    {id:'settings',label:'Settings',icon:'gear'},
-    {id:'audit',label:'Audit log',icon:'clipboard-list'}
+  function showLogin(err){
+    document.body.innerHTML=
+      '<div class="login"><div class="box" style="background:var(--surface);border:1px solid var(--border);border-radius:24px;box-shadow:var(--shadow-md);padding:36px 26px;max-width:420px">'+
+      '<img class="mark" src="/assets/img/logo.svg" alt="ExamLegacy" width="84" height="84">'+
+      '<h1 style="font-size:1.45rem;font-weight:800;margin:14px 0 4px">Control Center</h1>'+
+      '<div style="display:inline-block;padding:3px 10px;border-radius:999px;font-size:0.75rem;font-weight:700;letter-spacing:0.05em;background:linear-gradient(135deg,#f59e0b,#ea580c);color:#fff;margin-bottom:14px">SUPERADMIN SECURE PORTAL</div>'+
+      '<p style="color:var(--text-2);font-size:0.86rem;margin-bottom:20px;line-height:1.5">Independent ID &amp; Password Login.<br><span class="tiny muted">Protected from Google session issues.</span></p>'+
+      (err?'<div class="badge red" style="display:block;padding:10px;font-size:0.82rem;margin-bottom:16px;text-align:left;border-radius:10px;line-height:1.4">'+esc(err)+'</div>':'')+
+      '<form id="adm-login-form" style="text-align:left;display:flex;flex-direction:column;gap:12px">'+
+        '<div>'+
+          '<label style="font-size:0.78rem;font-weight:700;color:var(--text-2);margin-bottom:5px;display:block">Admin Email</label>'+
+          '<input type="email" id="adm-email" class="input" value="' + esc(SUPERADMIN_EMAIL) + '" required autocomplete="username" placeholder="sanjaykatara59927@gmail.com" style="width:100%;font-size:0.92rem;padding:11px 13px">'+
+        '</div>'+
+        '<div>'+
+          '<label style="font-size:0.78rem;font-weight:700;color:var(--text-2);margin-bottom:5px;display:block">Admin Password</label>'+
+          '<div style="position:relative">'+
+            '<input type="password" id="adm-password" class="input" required autocomplete="current-password" placeholder="Enter your admin password" style="width:100%;font-size:0.92rem;padding:11px 40px 11px 13px">'+
+            '<button type="button" id="adm-toggle-pwd" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-3);cursor:pointer;padding:4px">'+
+              '<i class="fas fa-eye" id="adm-pwd-icon"></i>'+
+            '</button>'+
+          '</div>'+
+        '</div>'+
+        '<button type="submit" class="btn block" id="adm-submit" style="margin-top:8px;padding:12px;font-weight:700;font-size:0.95rem">'+
+          '<i class="fas fa-shield-halved" style="margin-right:6px"></i> Sign In to Control Center'+
+        '</button>'+
+      '</form>'+
+      '<div class="tiny muted" style="margin-top:22px;letter-spacing:0.03em">ExamLegacy · Powered by SANJAYXLEGACY</div>'+
+      '</div></div>';
+
+    var form = qs('#adm-login-form');
+    var toggleBtn = qs('#adm-toggle-pwd');
+    var pwdInput = qs('#adm-password');
+    var pwdIcon = qs('#adm-pwd-icon');
+
+    if (toggleBtn && pwdInput && pwdIcon) {
+      toggleBtn.addEventListener('click', function () {
+        if (pwdInput.type === 'password') {
+          pwdInput.type = 'text';
+          pwdIcon.className = 'fas fa-eye-slash';
+        } else {
+          pwdInput.type = 'password';
+          pwdIcon.className = 'fas fa-eye';
+        }
+      });
+    }
+
+    if (form) {
+      form.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        var email = (qs('#adm-email').value || '').trim();
+        var password = (qs('#adm-password').value || '').trim();
+        var btn = qs('#adm-submit');
+        if (!email || !password) {
+          toast('Please enter email and password', 'err');
+          return;
+        }
+        btn.disabled = true;
+        btn.innerHTML = '<div class="spinner" style="width:16px;height:16px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:8px"></div> Verifying…';
+        try {
+          var res = await fetch(API + '/admin/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: email, password: password })
+          });
+          var data = await res.json();
+          if (!res.ok || !data.ok) {
+            var msg = (data && data.error && data.error.message) || 'Login failed';
+            throw new Error(msg);
+          }
+          var token = data.data.token;
+          localStorage.setItem('el_admin_secret', token);
+          admin = data.data.user;
+          toast('Welcome, Superadmin!', 'ok');
+          renderShell();
+        } catch (err) {
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fas fa-shield-halved" style="margin-right:6px"></i> Sign In to Control Center';
+          toast(err.message || 'Invalid credentials', 'err');
+          showLogin(err.message);
+        }
+      });
+    }
+  }
+
+  var NAV_GROUPS = [
+    {
+      group: 'Overview',
+      items: [
+        {id:'dashboard',label:'Dashboard',icon:'gauge-high'},
+        {id:'products',label:'Products & Materials',icon:'book'},
+        {id:'orders',label:'Orders & Sales',icon:'receipt'},
+        {id:'users',label:'Users & Balances',icon:'users'}
+      ]
+    },
+    {
+      group: 'Operations',
+      items: [
+        {id:'support',label:'Study Arena & Support',icon:'headset'},
+        {id:'notifications',label:'Push Broadcasts',icon:'bell'},
+        {id:'vip',label:'VIP Pass Plans',icon:'crown'},
+        {id:'packs',label:'AI Credit Packs',icon:'coins'}
+      ]
+    },
+    {
+      group: 'System',
+      items: [
+        {id:'settings',label:'Platform Settings',icon:'gear'},
+        {id:'audit',label:'Security & Audit Log',icon:'shield-halved'}
+      ]
+    }
   ];
 
   function renderShell(){
+    var uName = (admin && admin.name) || 'Sanjay Katara';
+    var uEmail = (admin && admin.email) || SUPERADMIN_EMAIL;
+
+    var navHtml = NAV_GROUPS.map(function(grp){
+      var items = grp.items.map(function(s){
+        return '<button data-sec="'+s.id+'">'+icon(s.icon)+'<span>'+esc(s.label)+'</span></button>';
+      }).join('');
+      return '<div class="nav-group-label">'+esc(grp.group)+'</div>' + items;
+    }).join('');
+
     document.body.innerHTML=
       '<div class="shell">'+
-      '<aside class="sidebar" id="sidebar"><div class="logo"><img class="m" src="/assets/img/mark.svg" alt=""><span>ExamLegacy</span></div><nav class="nav" id="nav"></nav></aside>'+
-      '<div style="flex:1;min-width:0">'+
-        '<div class="topbar"><button class="iconbtn hamb" id="hamb">'+icon('bars')+'</button><h1 id="sec-title">Dashboard</h1>'+
-        '<button class="iconbtn" id="theme-btn">'+icon('moon')+'</button>'+
-        '<button class="iconbtn" id="signout">'+icon('right-from-bracket')+'</button></div>'+
+      '<aside class="sidebar" id="sidebar">'+
+        '<div class="logo"><img class="m" src="/assets/img/mark.svg" alt=""><div><div style="font-weight:800;font-size:1.05rem;line-height:1.2">ExamLegacy</div><div style="font-size:0.7rem;color:var(--text-3);font-weight:600">Pro Control Center</div></div></div>'+
+        '<nav class="nav" id="nav">'+navHtml+'</nav>'+
+        '<div class="side-foot">'+
+          '<div class="side-user">'+
+            '<div class="av">SK</div>'+
+            '<div class="info">'+
+              '<div class="name">'+esc(uName)+'</div>'+
+              '<div class="email">'+esc(uEmail)+'</div>'+
+            '</div>'+
+            '<button class="iconbtn" id="side-signout" title="Sign out" style="width:30px;height:30px;border-radius:8px">'+icon('right-from-bracket')+'</button>'+
+          '</div>'+
+        '</div>'+
+      '</aside>'+
+      '<div style="flex:1;min-width:0;display:flex;flex-direction:column">'+
+        '<div class="topbar">'+
+          '<button class="iconbtn hamb" id="hamb">'+icon('bars')+'</button>'+
+          '<h1 id="sec-title">Dashboard</h1>'+
+          '<span class="status-pill"><span class="status-dot"></span> Hybrid DB · Online</span>'+
+          '<span class="superadmin-tag"><i class="fas fa-crown"></i> SUPERADMIN</span>'+
+          '<div style="flex:1"></div>'+
+          '<button class="iconbtn" id="theme-btn" title="Toggle appearance">'+icon('moon')+'</button>'+
+          '<button class="iconbtn" id="signout" title="Sign out">'+icon('right-from-bracket')+'</button>'+
+        '</div>'+
         '<main class="main" id="main"></main>'+
       '</div></div><div class="toasts"></div>';
-    qs('#nav').innerHTML=SECTIONS.map(function(s){return '<button data-sec="'+s.id+'">'+icon(s.icon)+'<span>'+s.label+'</span></button>';}).join('');
-    qsa('#nav [data-sec]').forEach(function(b){b.addEventListener('click',function(){go(b.getAttribute('data-sec'));qs('#sidebar').classList.remove('open');});});
+
+    qsa('#nav [data-sec]').forEach(function(b){
+      b.addEventListener('click',function(){
+        go(b.getAttribute('data-sec'));
+        qs('#sidebar').classList.remove('open');
+      });
+    });
     qs('#hamb').addEventListener('click',function(){qs('#sidebar').classList.toggle('open');});
-    qs('#theme-btn').addEventListener('click',function(){var o=['light','dark','system'];var c=localStorage.getItem('el_theme')||'system';localStorage.setItem('el_theme',o[(o.indexOf(c)+1)%o.length]);applyTheme();});
-    qs('#signout').addEventListener('click',function(){localStorage.removeItem('el_admin_secret');admin=null;showLogin();});
+    qs('#theme-btn').addEventListener('click',function(){
+      var o=['light','dark','system'];
+      var c=localStorage.getItem('el_theme')||'system';
+      localStorage.setItem('el_theme',o[(o.indexOf(c)+1)%o.length]);
+      applyTheme();
+    });
+
+    function doSignOut(){
+      localStorage.removeItem('el_admin_secret');
+      var auth = getAdminAuth();
+      if(auth) auth.signOut().catch(function(){});
+      location.reload();
+    }
+    qs('#signout').addEventListener('click', doSignOut);
+    var sideSignOut = qs('#side-signout');
+    if (sideSignOut) sideSignOut.addEventListener('click', doSignOut);
+
     go('dashboard');
   }
-  function go(id){section=id;qsa('#nav [data-sec]').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-sec')===id);});
-    var s=SECTIONS.filter(function(x){return x.id===id;})[0]; if(s)qs('#sec-title').textContent=s.label;
-    ({dashboard:dashboard,products:products,orders:orders,users:users,support:support,notifications:notifications,vip:vip,packs:packs,settings:settings,audit:audit})[id]();
+
+  function go(id){
+    section=id;
+    qsa('#nav [data-sec]').forEach(function(b){
+      b.classList.toggle('active',b.getAttribute('data-sec')===id);
+    });
+    var allItems = [];
+    NAV_GROUPS.forEach(function(g){ allItems = allItems.concat(g.items); });
+    var s = allItems.filter(function(x){return x.id===id;})[0];
+    if(s) qs('#sec-title').textContent = s.label;
+    ({
+      dashboard:dashboard, products:products, orders:orders, users:users,
+      support:support, notifications:notifications, vip:vip, packs:packs,
+      settings:settings, audit:audit
+    })[id]();
   }
 
   /* ---------- Dashboard ---------- */
@@ -243,12 +471,8 @@
       try{var list=(await api('GET','/admin/orders'+(filter!=='all'?('?status='+filter):''))).orders||[];
         qs('#ot').innerHTML=list.length?('<table><thead><tr><th>Code</th><th>Status</th><th>Method</th><th>Total</th><th>Items</th><th>Date</th><th></th></tr></thead><tbody>'+
           list.map(function(o){return '<tr><td class="mono">'+esc(o.order_code)+'</td><td>'+statusBadge(o.status)+'</td><td>'+esc(o.payment_method)+'</td><td class="mono">'+money(o.total_paise,o.currency)+'</td><td>'+o.items.length+'</td><td class="tiny muted">'+new Date(o.created_at).toLocaleString()+'</td>'+
-            '<td style="white-space:nowrap"><button class="btn sm soft" data-view="'+o.id+'">View</button> <button class=\"btn sm soft\" data-recheck=\"'+o.id+'\">Recheck</button>'+(o.status==='paid'?' <button class="btn sm danger" data-refund="'+o.id+'">Refund</button>':'')+'</td></tr>';}).join('')+'</tbody></table>'):'<div class="muted" style="padding:16px">No orders.</div>';
+            '<td style="white-space:nowrap"><button class="btn sm soft" data-view="'+o.id+'">View</button>'+(o.status==='paid'?' <button class="btn sm danger" data-refund="'+o.id+'">Refund</button>':'')+'</td></tr>';}).join('')+'</tbody></table>'):'<div class="muted" style="padding:16px">No orders.</div>';
         qsa('[data-view]').forEach(function(b){b.addEventListener('click',function(){viewOrder(list.filter(function(o){return o.id==b.getAttribute('data-view');})[0]);});});
-        qsa('[data-recheck]').forEach(function(b){b.addEventListener('click',async function(){
-          try{var rc=await api('POST','/admin/orders/'+b.getAttribute('data-recheck')+'/recheck',{});toast('Rechecked: '+rc.after,'ok');load();}
-          catch(e){toast(e.message,'err');}
-        });});
         qsa('[data-refund]').forEach(function(b){b.addEventListener('click',async function(){
           if(await confirmDialog('Refund order?','Credits the total to the user wallet and revokes PDF access.',true)){
             try{await api('POST','/admin/orders/'+b.getAttribute('data-refund')+'/refund',{});toast('Refunded','ok');load();}catch(e){toast(e.message,'err');}
@@ -293,33 +517,92 @@
     load();
   }
   async function manageUser(u){
-    var full;
-    try{full=await api('GET','/admin/users/'+u.id);}catch(e){return toast(e.message,'err');}
-    full=full.user;
-    var m=modal('Manage '+full.name,
+    var full, allProducts = [];
+    try {
+      var r = await Promise.all([
+        api('GET', '/admin/users/' + u.id),
+        api('GET', '/admin/products').catch(function(){ return { products: [] }; })
+      ]);
+      full = r[0].user;
+      allProducts = (r[1] && r[1].products) || [];
+    } catch(e) { return toast(e.message, 'err'); }
+
+    var productOptions = '<option value="">-- Choose Product to Grant/Revoke --</option>' +
+      allProducts.map(function(p){
+        return '<option value="' + p.id + '">#' + p.id + ' ' + esc(p.title) + ' (' + money(p.price_paise) + ')</option>';
+      }).join('');
+
+    var m = modal('Manage ' + full.name,
       '<div class="grid2">'+
-      '<div class="card"><div class="tiny muted">Wallet</div><div class="b mono" style="font-size:1.3rem">'+money(full.wallet_balance_paise)+'</div>'+
-        '<div class="row gap8 mt8"><input class="input" id="wa" type="number" placeholder="± paise"><button class="btn sm" id="wa-apply">Adjust</button></div></div>'+
-      '<div class="card"><div class="tiny muted">AI Credits</div><div class="b mono" style="font-size:1.3rem">'+full.ai_credit_balance+'</div>'+
-        '<div class="row gap8 mt8"><input class="input" id="ca" type="number" placeholder="± credits"><button class="btn sm" id="ca-apply">Adjust</button></div></div>'+
+      '<div class="card"><div class="tiny muted">Store Wallet</div><div class="b mono" id="m-wbal" style="font-size:1.3rem;margin:4px 0 8px">'+money(full.wallet_balance_paise)+'</div>'+
+        '<div class="row gap8"><input class="input" id="wa" type="number" placeholder="± paise (e.g. 5000 = ₹50)"><button class="btn sm" id="wa-apply">Adjust</button></div>'+
+        '<div class="row gap8 mt8">'+
+          '<button class="btn sm ghost" data-wquick="5000">+₹50</button>'+
+          '<button class="btn sm ghost" data-wquick="10000">+₹100</button>'+
+          '<button class="btn sm ghost" data-wquick="50000">+₹500</button>'+
+          '<button class="btn sm ghost" data-wquick="-5000">-₹50</button>'+
+        '</div>'+
+      '</div>'+
+      '<div class="card"><div class="tiny muted">AI Credits Balance</div><div class="b mono" id="m-cbal" style="font-size:1.3rem;margin:4px 0 8px">'+full.ai_credit_balance+'</div>'+
+        '<div class="row gap8"><input class="input" id="ca" type="number" placeholder="± credits"><button class="btn sm" id="ca-apply">Adjust</button></div>'+
+        '<div class="row gap8 mt8">'+
+          '<button class="btn sm ghost" data-cquick="50">+50</button>'+
+          '<button class="btn sm ghost" data-cquick="100">+100</button>'+
+          '<button class="btn sm ghost" data-cquick="500">+500</button>'+
+          '<button class="btn sm ghost" data-cquick="-50">-50</button>'+
+        '</div>'+
+      '</div>'+
       '</div>'+
       '<div class="card"><h3>Account status</h3><div class="row gap8">'+
-        '<button class="btn sm '+(full.status==='active'?'':'ghost')+'" data-status="active">Active</button>'+
-        '<button class="btn sm '+(full.status==='suspended'?'':'ghost')+'" data-status="suspended">Suspend</button>'+
-        '<button class="btn sm '+(full.status==='disabled'?'':'ghost')+'" data-status="disabled">Disable</button></div></div>'+
-      '<div class="card"><h3>PDF access</h3><div class="row gap8"><input class="input" id="ppid" type="number" placeholder="Product ID"><button class="btn sm soft" id="grant">Grant</button><button class="btn sm danger" id="revoke">Revoke</button></div>'+
-        '<div class="mt8 small">'+((full.pdf_access||[]).map(function(a){return '<div class="row between"><span>#'+a.id+' '+esc(a.title)+'</span><span class="badge '+(a.status==='active'?'green':'red')+'">'+a.status+'</span></div>';}).join('')||'<span class="muted">No access records</span>')+'</div></div>'+
-      '<div class="card"><h3>VIP PASS</h3><div class="row gap8"><input class="input" id="vpid" type="number" placeholder="Plan ID"><button class="btn sm" id="grant-vip">Grant VIP</button></div></div>'+
-      '<div class="card"><h3>Notify user</h3><input class="input" id="nt" placeholder="Title"><textarea id="nb" rows="2" class="mt8" placeholder="Body"></textarea><button class="btn sm soft mt8" id="send-n">Send notification</button></div>',
+        '<button class="btn sm '+(full.status==='active'?'':'ghost')+'" data-status="active"><i class="fas fa-check"></i> Active</button>'+
+        '<button class="btn sm '+(full.status==='suspended'?'':'ghost')+'" data-status="suspended"><i class="fas fa-ban"></i> Suspend</button>'+
+        '<button class="btn sm '+(full.status==='disabled'?'':'ghost')+'" data-status="disabled"><i class="fas fa-user-xmark"></i> Disable</button>'+
+      '</div></div>'+
+      '<div class="card"><h3>PDF & Material Access</h3>'+
+        '<div class="row gap8"><select class="input" id="ppid">'+productOptions+'</select><button class="btn sm soft" id="grant"><i class="fas fa-key"></i> Grant</button><button class="btn sm danger" id="revoke"><i class="fas fa-trash"></i> Revoke</button></div>'+
+        '<div class="mt8 small" id="pdf-access-list">'+((full.pdf_access||[]).map(function(a){return '<div class="row between" style="padding:4px 0;border-bottom:1px solid var(--border)"><span>#'+a.id+' '+esc(a.title)+'</span><span class="badge '+(a.status==='active'?'green':'red')+'">'+a.status+'</span></div>';}).join('')||'<span class="muted">No current active licenses.</span>')+'</div>'+
+      '</div>'+
+      '<div class="card"><h3>VIP Pass Access</h3><div class="row gap8"><input class="input" id="vpid" type="number" placeholder="Plan ID (e.g. 1)"><button class="btn sm" id="grant-vip"><i class="fas fa-crown"></i> Grant VIP</button></div></div>'+
+      '<div class="card"><h3>Direct In-App Notification</h3><input class="input" id="nt" placeholder="Notification Title"><textarea id="nb" rows="2" class="input mt8" placeholder="Message Body"></textarea><button class="btn sm soft mt8" id="send-n"><i class="fas fa-paper-plane"></i> Send Notification</button></div>',
       '<div class="row" style="justify-content:flex-end;margin-top:14px"><button class="btn ghost" data-x>Close</button></div>');
+
     qs('[data-x]',m.el).addEventListener('click',m.close);
     qsa('[data-status]',m.el).forEach(function(b){b.addEventListener('click',async function(){
       try{await api('POST','/admin/users/'+full.id+'/status',{status:b.getAttribute('data-status'),reason:'admin action'});toast('Status updated','ok');m.close();go('users');}catch(e){toast(e.message,'err');}
     });});
-    qs('#wa-apply',m.el).addEventListener('click',async function(){try{var r=await api('POST','/admin/users/'+full.id+'/wallet',{amount_paise:parseInt(qs('#wa',m.el).value||'0',10),reason:'manual adjustment'});toast('New balance '+money(r.balance_paise),'ok');}catch(e){toast(e.message,'err');}});
-    qs('#ca-apply',m.el).addEventListener('click',async function(){try{var r=await api('POST','/admin/users/'+full.id+'/credits',{amount:parseInt(qs('#ca',m.el).value||'0',10),reason:'manual adjustment'});toast('New credits '+r.balance,'ok');}catch(e){toast(e.message,'err');}});
-    qs('#grant',m.el).addEventListener('click',async function(){try{await api('POST','/admin/users/'+full.id+'/pdf/grant',{product_id:parseInt(qs('#ppid',m.el).value||'0',10)});toast('Access granted','ok');}catch(e){toast(e.message,'err');}});
-    qs('#revoke',m.el).addEventListener('click',async function(){try{await api('POST','/admin/users/'+full.id+'/pdf/revoke',{product_id:parseInt(qs('#ppid',m.el).value||'0',10)});toast('Access revoked','ok');}catch(e){toast(e.message,'err');}});
+
+    async function adjustW(amt){
+      try{
+        var r=await api('POST','/admin/users/'+full.id+'/wallet',{amount_paise:amt,reason:'manual adjustment'});
+        toast('New wallet balance '+money(r.balance_paise),'ok');
+        full.wallet_balance_paise = r.balance_paise;
+        qs('#m-wbal',m.el).textContent = money(r.balance_paise);
+      }catch(e){toast(e.message,'err');}
+    }
+    qs('#wa-apply',m.el).addEventListener('click',function(){adjustW(parseInt(qs('#wa',m.el).value||'0',10));});
+    qsa('[data-wquick]',m.el).forEach(function(b){b.addEventListener('click',function(){adjustW(parseInt(b.getAttribute('data-wquick'),10));});});
+
+    async function adjustC(amt){
+      try{
+        var r=await api('POST','/admin/users/'+full.id+'/credits',{amount:amt,reason:'manual adjustment'});
+        toast('New AI credits: '+r.balance,'ok');
+        full.ai_credit_balance = r.balance;
+        qs('#m-cbal',m.el).textContent = r.balance;
+      }catch(e){toast(e.message,'err');}
+    }
+    qs('#ca-apply',m.el).addEventListener('click',function(){adjustC(parseInt(qs('#ca',m.el).value||'0',10));});
+    qsa('[data-cquick]',m.el).forEach(function(b){b.addEventListener('click',function(){adjustC(parseInt(b.getAttribute('data-cquick'),10));});});
+
+    qs('#grant',m.el).addEventListener('click',async function(){
+      var pid = parseInt(qs('#ppid',m.el).value||'0',10);
+      if(!pid){toast('Select a product to grant','err');return;}
+      try{await api('POST','/admin/users/'+full.id+'/pdf/grant',{product_id:pid});toast('Access granted','ok');m.close();manageUser(u);}catch(e){toast(e.message,'err');}
+    });
+    qs('#revoke',m.el).addEventListener('click',async function(){
+      var pid = parseInt(qs('#ppid',m.el).value||'0',10);
+      if(!pid){toast('Select a product to revoke','err');return;}
+      try{await api('POST','/admin/users/'+full.id+'/pdf/revoke',{product_id:pid});toast('Access revoked','ok');m.close();manageUser(u);}catch(e){toast(e.message,'err');}
+    });
     qs('#grant-vip',m.el).addEventListener('click',async function(){try{await api('POST','/admin/users/'+full.id+'/vip',{plan_id:parseInt(qs('#vpid',m.el).value||'0',10)});toast('VIP granted','ok');}catch(e){toast(e.message,'err');}});
     qs('#send-n',m.el).addEventListener('click',async function(){try{await api('POST','/admin/notify',{user_id:full.id,category:'system',title:qs('#nt',m.el).value,body:qs('#nb',m.el).value});toast('Notification sent','ok');}catch(e){toast(e.message,'err');}});
   }

@@ -172,11 +172,11 @@ EL.ui = (function () {
     current = r;
     var def_ = routes[r.name];
     var content = EL.qs('#content');
+    if (content) content.scrollTop = 0;
     window.scrollTo(0, 0);
-    if (content) { content.scrollTop = 0; } /* anti-gravity: #content is the scroller */
     if (content) content.innerHTML = '';
     afterHooks = [];
-    try { def_.handler(content, r.params); } catch (e) { console.error(e); if (content) content.innerHTML = errorBox(e.message || 'Failed to load'); }
+    try { def_.handler(content, r.params); } catch (e) { if (content) content.innerHTML = errorBox('Unable to display this section. Please refresh to reload.'); }
     // Blueprint rule #2: every dispatch plays the .screen-enter view transition.
     playScreenEnter(content);
     // Staggered entrance for the route's top-level blocks (skipped under

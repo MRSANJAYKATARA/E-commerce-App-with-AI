@@ -11,18 +11,20 @@
  */
 'use strict';
 
-const VERSION = 'examlegacy-v2';
+const VERSION = 'examlegacy-v4';
 const SHELL_CACHE = VERSION + '-shell';
 const CDN_CACHE = VERSION + '-cdn';
 
 const SHELL = [
   '/',
   '/index.html',
+  '/privacy.html',
   '/admin/',
   '/assets/css/app.css',
   '/assets/js/config.js',
   '/assets/js/api.js',
   '/assets/js/auth.js',
+  '/assets/js/firestore.js',
   '/assets/js/ui.js',
   '/assets/js/viewer.js',
   '/assets/js/app.js',

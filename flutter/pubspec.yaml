@@ -1,0 +1,42 @@
+name: examlegacy_flutter
+description: "ExamLegacy High Performance 120 FPS Native Mobile Client"
+publish_to: "none"
+version: 2.0.0+1
+
+environment:
+  sdk: ">=3.2.0 <4.0.0"
+  flutter: ">=3.16.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State Management (Reactive, High Performance)
+  flutter_riverpod: ^2.5.1
+
+  # Networking & Cloud Firestore
+  http: ^1.2.0
+  firebase_core: ^2.27.0
+  firebase_auth: ^4.17.8
+  cloud_firestore: ^4.15.8
+
+  # High-Performance Offline Storage (0ms Read)
+  shared_preferences: ^2.2.2
+  path_provider: ^2.1.2
+
+  # 120Hz Display Synchronization
+  flutter_displaymode: ^0.6.0
+
+  # High Performance Images & SVG
+  cached_network_image: ^3.3.1
+  flutter_svg: ^2.0.10+1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/img/

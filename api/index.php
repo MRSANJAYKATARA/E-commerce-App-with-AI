@@ -25,13 +25,16 @@ use ExamLegacy\Notifications;
 use ExamLegacy\Settings;
 use ExamLegacy\Admin;
 use ExamLegacy\Mailer;
+use ExamLegacy\RateLimit;
+use ExamLegacy\Gemini;
+use ExamLegacy\PdfText;
 
 // ---- CORS (same-origin by default; the frontend is served from this origin) --
 
 $method = Http::method();
 if ($method === 'OPTIONS') {
     header('Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS');
-    header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Viewer-Token');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Viewer-Token, X-Authorization, X-Firebase-Token, X-Admin-Token');
     http_response_code(204);
     exit;
 }
@@ -49,31 +52,69 @@ try {
     Http::fail($e);
 } catch (Throwable $e) {
     error_log('[ExamLegacy] ' . $e->getMessage());
-    Http::fail(new ApiError('server_error', APP_DEBUG ? $e->getMessage() : 'Something went wrong', 500));
+    $errMessage = $e->getMessage();
+    if (APP_DEBUG) {
+        $msg = $errMessage;
+    } else {
+        if (strpos($errMessage, 'Unknown column') !== false || strpos($errMessage, "doesn't exist") !== false || strpos($errMessage, 'Base table') !== false) {
+            $msg = 'Database setup required. Please visit /install.php to initialize tables.';
+        } elseif (strpos($errMessage, 'Database unavailable') !== false || strpos($errMessage, 'Connection refused') !== false || strpos($errMessage, 'getaddrinfo') !== false) {
+            $msg = 'Database is currently unreachable. Please check database server or connection settings.';
+        } else {
+            $msg = 'Something went wrong. Please try again later.';
+        }
+    }
+    Http::fail(new ApiError('server_error', $msg, 500));
 }
 
 // ===========================================================================
 function route(string $path, string $method): void
 {
     // ---- Public routes ----
+    if ($path === '/health' && $method === 'GET') {
+        $dbOk = false;
+        try {
+            Db::scalar('SELECT 1');
+            $dbOk = true;
+        } catch (\Throwable $e) {}
+        Http::ok([
+            'status' => $dbOk ? 'healthy' : 'degraded',
+            'version' => '2.0.0',
+            'database' => $dbOk ? 'connected' : 'error',
+            'timestamp' => time(),
+            'php_version' => PHP_VERSION,
+        ]);
+        return;
+    }
     if ($path === '/config' && $method === 'GET') {
         Http::ok(['config' => Settings::publicConfig()]);
         return;
     }
-    // Uptime/health probe — exposes no internals.
-    if ($path === '/health' && $method === 'GET') {
-        try {
-            Db::one('SELECT 1 AS ok');
-        } catch (\Throwable $e) {
-            throw new ApiError('db_unavailable', 'Service temporarily unavailable', 503);
-        }
-        Http::ok(['status' => 'ok', 'db' => true, 'version' => '2.0.0', 'time' => gmdate('c')]);
-        return;
-    }
-    // Superadmin console login — dedicated email+password (zero Google dependency).
-    if ($path === '/admin/auth/login' && $method === 'POST') {
-        $in = Http::jsonBody();
-        Http::ok(Auth::adminLogin((string) ($in['email'] ?? ''), (string) ($in['password'] ?? '')));
+    if ($path === '/legal/privacy' && $method === 'GET') {
+        Http::ok([
+            'act' => 'Digital Personal Data Protection Act, 2023 (India)',
+            'version' => '2.0.0-DPDP-2026',
+            'effective_date' => '2026-09-25',
+            'data_fiduciary' => [
+                'name' => 'ExamLegacy',
+                'brand' => 'Powered by SANJAYXLEGACY',
+                'jurisdiction' => 'India',
+            ],
+            'grievance_officer' => [
+                'name' => Settings::get('grievance_officer_name', 'Sanjay Katara'),
+                'designation' => 'Data Protection Officer & Grievance Redressal Officer',
+                'email' => Settings::get('grievance_officer_email', 'sanjayxlegacysupport@gmail.com'),
+                'address' => 'ExamLegacy Support, Rajasthan, India',
+                'sla_resolution_days' => 7,
+            ],
+            'statutory_rights' => [
+                'right_to_access_information',
+                'right_to_correction_and_erasure',
+                'right_to_grievance_redressal',
+                'right_to_nominate',
+            ],
+            'policy_url' => '/privacy.html',
+        ]);
         return;
     }
     if ($path === '/categories' && $method === 'GET') {
@@ -422,19 +463,17 @@ function route(string $path, string $method): void
 // ===========================================================================
 function adminRoutes(string $path, string $method): void
 {
+    if (($path === '/admin/login' || $path === '/admin/auth/login') && $method === 'POST') {
+        $b = Http::jsonBody();
+        $email = (string) ($b['email'] ?? '');
+        $password = (string) ($b['password'] ?? '');
+        $res = Auth::adminLogin($email, $password);
+        Http::ok($res);
+        return;
+    }
+
     $admin = Auth::authenticateAdmin();
     $adminId = (int) $admin['id'];
-
-    // Identity for the dedicated (email+password) admin session.
-    if ($path === '/admin/auth/me' && $method === 'GET') {
-        Http::ok(['admin' => $admin]);
-        return;
-    }
-    // Manual gateway recheck — re-verifies the latest payment intent against Cashfree.
-    if (preg_match('#^/admin/orders/(\d+)/recheck$#', $path, $m) && $method === 'POST') {
-        Http::ok(Payments::recheckForAdmin((int) $m[1], $adminId));
-        return;
-    }
 
     if ($path === '/admin/stats' && $method === 'GET') {
         Http::ok(['stats' => Admin::stats()]);

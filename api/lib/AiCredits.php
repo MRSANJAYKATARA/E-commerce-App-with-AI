@@ -50,6 +50,14 @@ final class AiCredits
             Db::run('UPDATE users SET ai_credit_balance = ? WHERE id = ?', [$balance, $userId]);
             return $balance;
         });
+
+        // Dual-sync updated AI credits to Cloud Firestore
+        try {
+            $u = Db::one('SELECT * FROM users WHERE id = ?', [$userId]);
+            if ($u) Firestore::syncUser($u);
+        } catch (\Throwable $e) {}
+
+        return $result;
     }
 
     /**
@@ -65,7 +73,7 @@ final class AiCredits
         if ($amount === 0) {
             return self::balance($userId);
         }
-        return Db::transaction(function () use ($userId, $amount, $usageId, $description) {
+        $result = Db::transaction(function () use ($userId, $amount, $usageId, $description) {
             $user = Db::one('SELECT ai_credit_balance FROM users WHERE id = ? FOR UPDATE', [$userId]);
             if ($user === null) {
                 throw new ApiError('not_found', 'User not found', 404);
@@ -89,6 +97,14 @@ final class AiCredits
             Db::run('UPDATE users SET ai_credit_balance = ? WHERE id = ?', [$balance, $userId]);
             return $balance;
         });
+
+        // Dual-sync updated AI credits to Cloud Firestore
+        try {
+            $u = Db::one('SELECT * FROM users WHERE id = ?', [$userId]);
+            if ($u) Firestore::syncUser($u);
+        } catch (\Throwable $e) {}
+
+        return $result;
     }
 
     /**

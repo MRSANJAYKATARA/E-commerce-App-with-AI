@@ -13,7 +13,7 @@ final class Mailer
 {
     public static function configured(): bool
     {
-        return SMTP_HOST !== '' && class_exists(\PHPMailer\PHMailer\PHPMailer::class);
+        return SMTP_HOST !== '' && class_exists(\PHPMailer\PHPMailer\PHPMailer::class);
     }
 
     public static function send(string $toEmail, string $toName, string $subject, string $htmlBody, string $textBody = ''): bool
@@ -25,14 +25,14 @@ final class Mailer
             }
             return false;
         }
-        if (!class_exists(\PHPMailer\PHMailer\PHPMailer::class)) {
+        if (!class_exists(\PHPMailer\PHPMailer\PHPMailer::class)) {
             error_log('[ExamLegacy] PHPMailer not installed (run composer install).');
             if (APP_DEBUG) {
                 throw new ApiError('mail_not_installed', 'PHPMailer not installed', 503);
             }
             return false;
         }
-        $mail = new \PHPMailer\PHMailer\PHPMailer(true);
+        $mail = new \PHPMailer\PHPMailer\PHPMailer(true);
         try {
             $mail->isSMTP();
             $mail->Host = SMTP_HOST;
@@ -43,7 +43,7 @@ final class Mailer
                 $mail->Password = SMTP_PASS;
             }
             if (SMTP_SECURE !== '') {
-                $mail->SMTPSecure = SMTP_SECURE === 'tls' ? \PHPMailer\PHMailer\PHPMailer::ENCRYPTION_STARTTLS : \PHPMailer\PHMailer\PHPMailer::ENCRYPTION_SMTPS;
+                $mail->SMTPSecure = SMTP_SECURE === 'tls' ? \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS : \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS;
             }
             $mail->CharSet = 'UTF-8';
             $mail->setFrom(SMTP_FROM !== '' ? SMTP_FROM : 'no-reply@example.com', SMTP_FROM_NAME);
@@ -57,6 +57,22 @@ final class Mailer
         } catch (\Throwable $e) {
             error_log('[ExamLegacy] Mail send failed: ' . $e->getMessage());
             return false;
+        }
+    }
+
+    /** Welcome email for new accounts (50 free AI credits). Never throws. */
+    public static function sendWelcomeEmail(string $toEmail, string $toName): void
+    {
+        if (!self::configured() || $toEmail === '') { return; }
+        $name = $toName !== '' ? $toName : 'there';
+        $html = '<h2>Welcome to ExamLegacy</h2>'
+            . '<p>Hi ' . htmlspecialchars($name) . ',</p>'
+            . '<p>Your account is ready and <strong>50 free AI credits</strong> are waiting for you.</p>'
+            . '<p>Happy learning!<br>— Team ExamLegacy</p>';
+        try {
+            self::send($toEmail, $name, 'Welcome to ExamLegacy — your 50 free AI credits are ready', $html);
+        } catch (\Throwable $e) {
+            error_log('[ExamLegacy] Welcome email failed: ' . $e->getMessage());
         }
     }
 

@@ -11,7 +11,7 @@ error_reporting(E_ALL);
 // ---- Load .env ------------------------------------------------------------
 // Minimal, dependency-free .env parser. Real secrets live only in .env / env vars.
 (function (): void {
-    $envPath = dirname(__DIR__) . '/.env';
+    $envPath = getenv('ENV_FILE') ?: (dirname(__DIR__) . '/.env');
     if (!is_readable($envPath)) {
         return;
     }
@@ -123,24 +123,14 @@ define('SMTP_FROM', env('SMTP_FROM', ''));
 define('SMTP_FROM_NAME', env('SMTP_FROM_NAME', 'ExamLegacy'));
 define('SMTP_SECURE', env('SMTP_SECURE', 'tls'));
 
-define('STORAGE_PATH', rtrim(env('STORAGE_PATH', dirname(__DIR__) . '/storage'), '/'));
-define('PDFS_DIR', STORAGE_PATH . '/' . trim(env('PDFS_DIR', 'pdfs'), '/'));
-define('UPLOADS_DIR', STORAGE_PATH . '/' . trim(env('UPLOADS_DIR', 'uploads'), '/'));
-define('PUBLIC_MEDIA_DIR', STORAGE_PATH . '/' . trim(env('PUBLIC_MEDIA_DIR', 'public'), '/'));
+$rawStorage = trim((string) env('STORAGE_PATH', ''));
+define('STORAGE_PATH', rtrim($rawStorage !== '' ? $rawStorage : (dirname(__DIR__) . '/storage'), '/'));
+define('PDFS_DIR', STORAGE_PATH . '/' . trim((string) (env('PDFS_DIR') ?: 'pdfs'), '/'));
+define('UPLOADS_DIR', STORAGE_PATH . '/' . trim((string) (env('UPLOADS_DIR') ?: 'uploads'), '/'));
+define('PUBLIC_MEDIA_DIR', STORAGE_PATH . '/' . trim((string) (env('PUBLIC_MEDIA_DIR') ?: 'public'), '/'));
 
-define('VIEWER_TOKEN_SECRET', env('VIEWER_TOKEN_SECRET', 'dev-insecure-change-me'));
+define('VIEWER_TOKEN_SECRET', env('VIEWER_TOKEN_SECRET', ''));
 define('VIEWER_SESSION_TTL', (int) env('VIEWER_SESSION_TTL', '7200'));
-
-// ---- Superadmin console (dedicated email+password; ZERO Google dependency) ----
-define('ADMIN_EMAIL', env('ADMIN_EMAIL', ''));
-define('ADMIN_PASSWORD', env('ADMIN_PASSWORD', ''));
-define('ADMIN_TOKEN_TTL', (int) env('ADMIN_TOKEN_TTL', '2592000')); // 30 days (spec)
-define('ADMIN_TOKEN_SECRET', env('ADMIN_TOKEN_SECRET', (string) env('VIEWER_TOKEN_SECRET', 'dev-insecure-change-me')));
-
-// ---- Firestore real-time mirror (optional; server-side service account only) ----
-define('FIRESTORE_PROJECT_ID', env('FIRESTORE_PROJECT_ID', (string) env('FIREBASE_PROJECT_ID', '')));
-define('FIRESTORE_SERVICE_ACCOUNT', env('FIRESTORE_SERVICE_ACCOUNT', (string) env('FIREBASE_SERVICE_ACCOUNT', '')));
-define('FIRESTORE_SYNC', env_bool('FIRESTORE_SYNC', false));
 
 // Composer autoloader (PHPMailer, Firestore SDK) if dependencies are installed.
 $vendorAutoload = dirname(__DIR__) . '/vendor/autoload.php';
@@ -148,16 +138,25 @@ if (is_file($vendorAutoload)) {
     require $vendorAutoload;
 }
 
-// Autoload PHP classes from api/lib (PSR-4-ish: ExamLegacy\ => api/lib/)
+// Autoload PHP classes from api/lib (PSR-4-ish: ExamLegacy\ => api/lib/ with global alias fallback)
 spl_autoload_register(function (string $class): void {
     $prefix = 'ExamLegacy\\';
-    if (strncmp($class, $prefix, strlen($prefix)) !== 0) {
-        return;
+    if (strncmp($class, $prefix, strlen($prefix)) === 0) {
+        $rel = str_replace('\\', '/', substr($class, strlen($prefix)));
+        $file = __DIR__ . '/lib/' . $rel . '.php';
+        if (is_file($file)) {
+            require_once $file;
+            return;
+        }
     }
-    $rel = str_replace('\\', '/', substr($class, strlen($prefix)));
-    $file = __DIR__ . '/lib/' . $rel . '.php';
-    if (is_file($file)) {
-        require $file;
+    // Fallback: if called without ExamLegacy\ prefix, check api/lib/ and alias
+    $directFile = __DIR__ . '/lib/' . str_replace('\\', '/', $class) . '.php';
+    if (is_file($directFile)) {
+        require_once $directFile;
+        $namespaced = 'ExamLegacy\\' . $class;
+        if (!class_exists($class, false) && class_exists($namespaced, false)) {
+            class_alias($namespaced, $class);
+        }
     }
 });
 

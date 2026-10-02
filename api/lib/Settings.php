@@ -16,7 +16,7 @@ final class Settings
     {
         if (self::$cache === null) {
             self::$cache = [];
-            foreach (Db::all('SELECT `key`, value FROM site_settings') as $row) {
+            foreach (Db::all('SELECT `key`, value FROM settings') as $row) {
                 self::$cache[(string) $row['key']] = (string) ($row['value'] ?? '');
             }
         }
@@ -26,7 +26,7 @@ final class Settings
     public static function set(string $key, ?string $value): void
     {
         Db::run(
-            'INSERT INTO site_settings (`key`, value) VALUES (?,?)
+            'INSERT INTO settings (`key`, value) VALUES (?,?)
              ON DUPLICATE KEY UPDATE value = VALUES(value)',
             [$key, $value]
         );
@@ -48,8 +48,16 @@ final class Settings
             'whatsapp_channel'        => self::get('whatsapp_channel', ''),
             'whatsapp_support_enabled'=> self::get('whatsapp_support_enabled', '0') === '1',
             'whatsapp_support_link'   => self::get('whatsapp_support_link', ''),
-            'brand_powered_by'        => self::get('brand_powered_by', 'SANJAYXLEGACY'),
+            'brand_powered_by'        => self::get('brand_powered_by', 'Powered by SANJAYXLEGACY'),
             'trial_ai_credits'        => (int) self::get('trial_ai_credits', '0'),
+            'privacy_policy_url'      => '/privacy.html',
+            'dpdp_act_compliant'      => true,
+            'grievance_officer'       => [
+                'name'        => self::get('grievance_officer_name', 'Sanjay Katara'),
+                'designation' => 'Grievance Redressal & Data Protection Officer',
+                'email'       => self::get('grievance_officer_email', 'sanjayxlegacysupport@gmail.com'),
+                'act'         => 'Digital Personal Data Protection Act, 2023 (India)',
+            ],
         ];
     }
 }

@@ -77,7 +77,31 @@ final class StudyAi
         $parts[] = Gemini::textPart($question);
 
         $cost = max(0, (int) Settings::get('ai_credit_cost_study', '2'));
-        // Pre-check balance to give a clean, immediate message (authoritative spend happens after).
+        // Pre-check balance: auto-grant welcome or daily allowance so students are never blocked
+        if (AiCredits::balance($userId) < $cost) {
+            try {
+                AiCredits::credit(
+                    $userId,
+                    50,
+                    'trial',
+                    'welcome_trial_' . $userId,
+                    'Welcome AI Credits (Free 50 Queries)'
+                );
+            } catch (\Throwable $e) {}
+
+            if (AiCredits::balance($userId) < $cost) {
+                try {
+                    AiCredits::credit(
+                        $userId,
+                        10,
+                        'trial',
+                        'study_courtesy_' . $userId . '_' . date('Ymd'),
+                        'Daily Free Study AI Credit Boost'
+                    );
+                } catch (\Throwable $e) {}
+            }
+        }
+
         if (AiCredits::balance($userId) < $cost) {
             throw new ApiError('insufficient_credits', 'Not enough AI credits. Recharge or upgrade to VIP.', 402);
         }

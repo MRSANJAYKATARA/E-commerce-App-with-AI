@@ -14,7 +14,12 @@
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b1020">
 </head>
 <body>
-  <!-- Admin app — dedicated email+password auth (no Firebase on this surface) -->
+  <!-- Firebase (public web config) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <!-- Shared public config (Firebase web config) -->
+  <script src="/assets/js/config.js"></script>
+  <!-- Admin app -->
   <script src="/admin/assets/js/admin.js"></script>
 </body>
 </html>

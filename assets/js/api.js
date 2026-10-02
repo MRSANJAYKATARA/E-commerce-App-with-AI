@@ -7,7 +7,11 @@ EL.api = (function () {
   async function authHeader(extra) {
     var headers = Object.assign({ 'Content-Type': 'application/json' }, extra || {});
     var token = await EL.auth.currentToken();
-    if (token) headers['Authorization'] = 'Bearer ' + token;
+    if (token) {
+      headers['Authorization'] = 'Bearer ' + token;
+      headers['X-Authorization'] = 'Bearer ' + token;
+      headers['X-Firebase-Token'] = token;
+    }
     return headers;
   }
 
@@ -16,12 +20,16 @@ EL.api = (function () {
     if (body !== undefined && body !== null && method !== 'GET') {
       opts.body = typeof body === 'string' ? body : JSON.stringify(body);
     }
-    var res = await fetch(EL.API_BASE + path, opts);
-    var text = await res.text();
-    var data = null;
-    try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { ok: false, error: { message: 'Bad response' } }; }
+    var res, text, data = null;
+    try {
+      res = await fetch(EL.API_BASE + path, opts);
+      text = await res.text();
+    } catch (netErr) {
+      throw new Error('Unable to connect to server. Please check your network connection.');
+    }
+    try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { ok: false, error: { message: 'Service is momentarily updating. Please try again in a moment.' } }; }
     if (!res.ok || data.ok === false) {
-      var msg = (data && data.error && data.error.message) || ('Request failed (' + res.status + ')');
+      var msg = (data && data.error && data.error.message) || (res.status === 404 ? 'Service endpoint not found' : 'Something went wrong. Please check your connection and try again.');
       var err = new Error(msg);
       err.status = res.status;
       err.code = data && data.error && data.error.code;

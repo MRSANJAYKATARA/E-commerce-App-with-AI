@@ -24,3 +24,10 @@ api/vendor/
 .idea/
 .vscode/
 node_modules/
+
+.env.local
+.env.*
+/config/
+/storage/public/avatars/*
+/install.lock
+!.env.example

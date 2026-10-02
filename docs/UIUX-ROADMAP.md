@@ -4,24 +4,24 @@
 > as **one single delivery commit** (owner requested one-phase delivery — history squashed).
 >
 > Planning document — execution starts only after owner approval.
-> Inspired by **iOS 27 (WWDC 2026) "Liquid Glass 2.0"** + Apple HIG, translated to a web PWA.
+> Inspired by **Native Mobile Design & Apple HIG**, translated to a high-yield web PWA.
 
 ---
 
-## 1. What iOS 27 actually ships (research summary — WWDC, June 2026)
+## 1. Modern Native Mobile Design Principles
 
-iOS 27 is a **refinement year**, not a reinvention. Liquid Glass stays, but corrected:
+Modern mobile application design focuses on **clarity, legibility, and refined tactile feedback**:
 
-| # | iOS 27 change | Why it happened | Lesson for our web app |
-|---|---------------|-----------------|------------------------|
-| 1 | **Transparency/Intensity slider** (Ultra Clear → Tinted), default now **less transparent** | NN/g + users: text unreadable over busy content | Glass must have a **tinted default** and a **solid fallback**; never glass behind body text |
-| 2 | **Readability-first corrections** — contrast fixes, hairline borders, uniform toolbars | iOS 26 shipped too much transparency | Every glass surface = tint + hairline border + guaranteed text contrast (4.5:1) |
-| 3 | **Search re-integrated into the tab bar** (reverses iOS 26 split-search) | Navigation must be predictable | Bottom nav stays one predictable glass bar — no exotic nav experiments |
-| 4 | **Refracted, multi-layer app icons** (depth that shifts on tilt) | Icons needed depth + legibility | Icons/logos get subtle layered depth (light pass), not flat stickers |
-| 5 | **Edge-to-edge sidebars, reduced toolbar heights** | Less chrome, more content | Slimmer topbar/nav heights, content-first layout |
-| 6 | **"Search or Ask" gesture panel** | AI-first entry point | Store search + Study AI remain first-class, one-tap entry points |
-| 7 | **SF Pro type scale** (Large Title 34 → Caption 11; body floor 17pt), 8pt grid, 44pt tap targets, Clarity·Deference·Depth | Apple HIG 2026 | Copy this exact scale discipline into our CSS type tokens |
-| 8 | **Foldable / adaptive layouts** | New hardware | Fluid reflow already handled by responsive tokens; keep it that way |
+| # | Design Principle | Why It Matters | Implementation for Our Web App |
+|---|------------------|----------------|--------------------------------|
+| 1 | **Transparency & Intensity Control** (Clear → Tinted) | Users need legible text over content | Glass has a **tinted default** and solid fallbacks; never glass behind long body text |
+| 2 | **Readability-First Corrections** — contrast, hairline borders | Excessive transparency reduces readability | Every glass surface = tint + hairline border + guaranteed contrast (4.5:1) |
+| 3 | **Integrated Navigation** | Navigation must be predictable and intuitive | Bottom nav stays one predictable bar — fast, single-tap switching |
+| 4 | **Subtle Depth & Tactile Hierarchy** | Interface elements need clear affordance | Icons and cards get clean subtle depth without decorative visual noise |
+| 5 | **Reduced Header/Chrome Heights** | Maximize content visibility | Compact topbar/nav heights for high information density |
+| 6 | **Fast Action Hubs** | Instant entry to primary user workflows | Store search and Study AI are first-class, one-tap entry points |
+| 7 | **Standard Mobile Type Scale** (Display → Footnote), 8pt grid, 44pt tap targets | Professional design discipline | Clean scale discipline in CSS tokens with Outfit + system fallbacks |
+| 8 | **Responsive Viewport Reflow** | Multi-device consistency | Fluid reflow handled by responsive tokens and zero desktop zoom lock |
 
 Sources: Apple Developer "What's new in Design" (Jun 8 2026), WWDC 2026 coverage (Techtimes, Mashable, Orizon, Technet), Apple HIG-derived design system breakdown (superdesign.dev, 2026).
 
@@ -41,17 +41,17 @@ Sources: Apple Developer "What's new in Design" (Jun 8 2026), WWDC 2026 coverage
 
 ```
                         ┌─────────────────────────────────────────┐
-                        │   MODERN UI/UX  v3  (iOS 27-grade web)  │
+                        │   MODERN UI/UX  v3  (Native Mobile Web) │
                         │   Clarity · Deference · Depth           │
                         └───────────────────┬─────────────────────┘
           ┌─────────────────┬───────────────┼───────────────┬──────────────────┐
           ▼                 ▼               ▼               ▼                  ▼
  ┌─────────────────┐ ┌──────────────┐ ┌──────────────┐ ┌─────────────┐ ┌────────────────┐
  │  A. TYPOGRAPHY  │ │ B. GLASS-    │ │ C. DEPTH &   │ │ D. COMPONENT│ │ E. ACCESS &    │
- │     SYSTEM      │ │  MORPHISM 2.0│ │   MOTION     │ │   REFRESH   │ │ PERFORMANCE    │
+ │     SYSTEM      │ │  MORPHISM    │ │   MOTION     │ │   REFRESH   │ │ PERFORMANCE    │
  └────────┬────────┘ └──────┬───────┘ └──────┬───────┘ └──────┬──────┘ └───────┬────────┘
           │                 │                │                │                │
-   · SF-iOS27 scale   · tinted default   · z-layers      · topbar/nav     · contrast 4.5:1
+   · Mobile scale     · tinted default   · z-layers      · topbar/nav     · contrast 4.5:1
      (34/28/22/20/      (NOT ultra-clear   (bg→surface→     (slimmer,     · 44px min taps
       17/16/15/          α .72 light /      glass→pop)       edge glass)   · reduced-transparency
       13/12 rem)          .55 dark)       · screen-enter  · cards: solid     = our own
@@ -65,7 +65,7 @@ Sources: Apple Developer "What's new in Design" (Jun 8 2026), WWDC 2026 coverage
    · line-height      · @supports solid   · celebration   · VIP/promo   · 60fps budget:
      rhythm 1.5-1.6     fallback            shimmer          :pulse-glow     ≤5 glass surfaces
    · Outfit (display) + system fallback   · reduced-      · icons: layered · prefers-reduced-
-     + -apple-system SF pairing             motion full       light pass      motion honored
+     + system sans pairing                  motion full       light pass      motion honored
 ```
 
 ---
@@ -73,26 +73,26 @@ Sources: Apple Developer "What's new in Design" (Jun 8 2026), WWDC 2026 coverage
 ## 4. ROADMAP (6 phases, sequential, each self-verifiable)
 
 ### Phase 0 — Token foundation (design tokens v3)
-- New type tokens: `--fs-display … --fs-caption` mapped to iOS 27 scale (rem-based), `--lh-*`, `--fw-*`, `--tracking-*`
-- Glass tokens v3: `--glass-tint`, `--glass-blur`, `--glass-border-hairline`, `--glass-specular`, plus **`--glass-intensity`** user knob (mirrors iOS 27 slider: Clear ↔ Tinted)
+- New type tokens: `--fs-display … --fs-caption` mapped to standard mobile scale (rem-based), `--lh-*`, `--fw-*`, `--tracking-*`
+- Glass tokens v3: `--glass-tint`, `--glass-blur`, `--glass-border-hairline`, `--glass-specular`, plus **`--glass-intensity`** user knob (Clear ↔ Tinted)
 - Spacing locked to 4/8pt grid multiples; radius scale unchanged
 - **Deliverable:** tokens only, zero visual regression
 
 ### Phase 1 — Typography system
-- Pair **Outfit** (display/headings) with system stack (`-apple-system, SF Pro…`) for body — Apple-grade legibility on iOS devices, brand personality on headings
+- Pair **Outfit** (display/headings) with system stack (`-apple-system, SF Pro…`) for body — high legibility on mobile devices, brand personality on headings
 - Apply scale everywhere: screen titles (display), section titles (title2), body 17px/1.55, callout, footnote, caption
 - `font-variant-numeric: tabular-nums` on all prices, credits, order IDs
 - Measure/line-length cap ~68ch for chat + support text
 - **Deliverable:** every screen re-typed; no layout breakage (visual pass all 8 journeys)
 
-### Phase 2 — Glassmorphism 2.0 integration
-- Restyle glass surfaces with **iOS 27 lensing recipe**: tinted bg + `blur(20px) saturate(180%)` + hairline inset border + specular top highlight + soft outer shadow
-- **Glass policy (the iOS 26/27 lesson):**
+### Phase 2 — Glassmorphism integration
+- Restyle glass surfaces with **lensing recipe**: tinted bg + `blur(20px) saturate(180%)` + hairline inset border + specular top highlight + soft outer shadow
+- **Glass policy:**
   - ✅ glass on: topbar, bottom nav, sheets, modals/scrim, toasts, install card
   - ❌ never glass behind: body paragraphs, chat transcripts, prices, PDF controls
   - Content cards stay **solid** with soft shadow — glass is chrome, not content
-- Dark theme: darker tint + white hairline; light theme: white tint + cool hairline
-- `--glass-intensity` settings row (Appearance section in Account): Clear / Balanced / Tinted (default **Balanced**)
+  - Dark theme: darker tint + white hairline; light theme: white tint + cool hairline
+  - `--glass-intensity` settings row (Appearance section in Account): Clear / Balanced / Tinted (default **Balanced**)
 - **Deliverable:** both themes × both apps (SPA + admin chrome) restyled
 
 ### Phase 3 — Component refresh
